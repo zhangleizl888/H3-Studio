@@ -236,6 +236,76 @@ export interface NodeOverride {
   fieldValue: unknown;
 }
 
+/**
+ * 一条工作流（或内置模板）上一个可以换的权重位。
+ *
+ * 清单一律由目标实例的 /object_info 回答 —— 这台的权重目录与命名和官方文档不一致是常态，
+ * 前端列什么用户就能选什么，服务端绝不就近凑一个。
+ */
+export interface ModelSlot {
+  /** "节点号.字段名"，就是任务里 models 的键 */
+  key: string;
+  node: string;
+  field: string;
+  classType: string;
+  label: string;
+  /** 底模 / 一体化模型 / 文本编码器 / VAE / LoRA 适配器 */
+  role: string;
+  current: string;
+  options: string[];
+  /** 图里写的那个文件名在这台实例上不存在 */
+  missing: boolean;
+}
+
+export interface WorkflowModelOptions {
+  workflowId: string;
+  workflowName: string;
+  instanceId: string;
+  placement: string;
+  protocol: string;
+  /** 下拉里默认展开的那一位（通常是底模） */
+  primary: string | null;
+  slots: ModelSlot[];
+  notes: string[];
+}
+
+/* ───────── 生成选择（每条资产/镜头各自一份） ───────── */
+
+/**
+ * 「这次用什么工作流、在哪台机器上、换哪颗权重」。
+ *
+ * 挂在角色/服装变体/场景/音色/镜头上，缺省回落项目配置 —— 同一部片里角色走 Klein、
+ * 场景走 Qwen-Image、某几个镜头走云端，是常态而不是例外。
+ */
+export interface GenPreset {
+  /** 与 config.imageTemplate 同一套写法："auto" / 内置模板名 / 库工作流的数字 id；留空=跟随项目 */
+  workflow?: string | null;
+  /** 生成实例 id；留空=跟随项目默认 */
+  instanceId?: string | null;
+  /** 模型覆盖：键取 ModelSlot.key，值必须是该实例报出来的文件名 */
+  models?: Record<string, string>;
+}
+
+/**
+ * 角色的音色。
+ *
+ * 本机出音色只有工作流库那一条路（audio 没有内置回落模板），所以这一份选择是必须的：
+ * 参考音频要落到服务端媒体库才可能被实例读走。
+ */
+export interface VoiceProfile {
+  /** 参考音频（克隆底子）：服务端 media id 才算数 */
+  refAudioIds: string[];
+  /** 克隆出来的试听样本 */
+  sampleMediaIds: string[];
+  /** 一句话音色描述：非克隆类工作流用它当提示词 */
+  timbre?: string;
+  /** 试念的文本 */
+  testText?: string;
+  language?: string;
+  preset?: GenPreset;
+  status?: AssetState;
+}
+
 /* ───────── 任务 ───────── */
 
 export type JobState = "queued" | "dispatching" | "running" | "succeeded" | "failed" | "canceled";
@@ -274,6 +344,10 @@ export interface Job {
   /** 后端按任务自动选中的那条工作流：用户要能看出「用的哪条、凭什么是它」 */
   workflowName?: string | null;
   chosenBy?: string | null;
+  /** 填图说明：哪张素材接到了哪个加载器、哪个分支被撤掉 */
+  fillNotes?: string[];
+  /** 换权重的结果（"底模 #127 ← xxx.safetensors"）。选了却没用上，这里就看得穿 */
+  modelNotes?: string[];
   promptId?: string | null;
   progress: JobProgress;
   queuePos?: number | null;
@@ -333,6 +407,8 @@ export interface Media {
   /** 下面几个只在 /api/media-versions 与 /api/trash 上有值：/api/media 给的是"活行"，没有版本概念 */
   version?: number | null;
   versionCount?: number | null;
+  /** 服务端真正用来分区的那把键：ref_id 为空时是 jobs/<任务目录>。客户端分组照它，别自己再算一遍 */
+  groupValue?: string | null;
   /** 软删（进了生成回收站）的时刻。有值就意味着取 blob 必须带 ?trashed=1 */
   deletedAt?: string | null;
   purgeAfter?: string | null;
@@ -560,6 +636,10 @@ export interface Character {
   negativePrompt?: string;
   /** 跨镜头必须一致的特征（脸、发型、标志物），拼提示词时单独成段 */
   coreFeatures?: string;
+  /** 这个角色用哪条工作流/哪台实例/哪颗权重出定妆照；留空跟项目默认 */
+  preset?: GenPreset;
+  /** 音色：角色的另一半，配音与带口型的镜头都靠它 */
+  voice?: VoiceProfile;
   status?: AssetState;
 }
 
@@ -570,6 +650,8 @@ export interface Variation {
   refMediaIds: string[];
   visualPrompt?: string;
   negativePrompt?: string;
+  /** 换装这条路和普通出图不是同一个形状，允许单独挑工作流 */
+  preset?: GenPreset;
   status?: AssetState;
 }
 
@@ -584,6 +666,8 @@ export interface Scene {
   refMediaIds: string[];
   visualPrompt?: string;
   negativePrompt?: string;
+  /** 场景概念图用哪条工作流/实例/权重：环境和人物本来就常常不是一个模型擅长 */
+  preset?: GenPreset;
   status?: AssetState;
 }
 
@@ -624,6 +708,10 @@ export interface Shot {
   locked: boolean;
   instanceId: string | null;
   workflowKey: string;
+  /** 这一镜出片用哪条工作流/哪台实例/哪颗权重。优先于上面那个旧 instanceId */
+  preset?: GenPreset;
+  /** 首尾帧是图片任务，和出片不是同一类工作流，允许各挑各的 */
+  imagePreset?: GenPreset;
   turbo: string | null;
   h3Prompt: H3Prompt;
   state: ShotState;
@@ -702,7 +790,7 @@ export interface RenderLog {
   jobId: string;
   error?: string;
   /** 日志弹窗要能回答「这是谁的图、用了哪个模型、多长的提示词」 */
-  resourceType?: "character" | "character-variation" | "scene" | "keyframe" | "video" | "script-parsing" | "export";
+  resourceType?: "character" | "character-variation" | "scene" | "keyframe" | "video" | "voice" | "script-parsing" | "export";
   resourceId?: string;
   resourceName?: string;
   model?: string;
@@ -768,6 +856,22 @@ export interface ImportReport {
   slotCount: number;
   estimated?: { seconds: number; frames: number; width: number; height: number; steps: number };
   installPlan?: string[];
+}
+
+/**
+ * 重新扫描的报告：后端报「这次按实例的 /object_info 重写了什么、还剩什么缺口」。
+ *
+ * 与 ImportReport 不是同一张单子 —— 导入那份要判图合法与否，重扫只报改动与剩余缺口，
+ * 硬套成 ImportReport 就得在调用处 `as unknown as` 一次，类型从此不再说明任何事。
+ */
+export interface RescanReport {
+  adaptations: WorkflowAdaptation[];
+  gaps: WorkflowGap[];
+  /** 写死的权重名被换成本机真实存在的文件，逐条改动 */
+  alignment: Record<string, string>[];
+  signals: WorkflowSignal[];
+  executesOn: string;
+  taskKind: string;
 }
 
 /* ───────── 文本模型用途（同步返回，结果直接写进 IndexedDB 的项目） ───────── */

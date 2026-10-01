@@ -86,6 +86,7 @@ export const JOB_KIND_LABEL: Record<JobKind, string> = {
   detect_shots: "镜头切分",
   assemble: "合成",
   workflow_test: "工作流试运行",
+  audio: "音色",
 };
 
 export const WORKFLOW_OPTIONS = [

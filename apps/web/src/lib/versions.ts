@@ -54,6 +54,7 @@ export function currentIdFor(project: Project, t: GenTarget): string | null {
       null
     );
   if (t.kind === "scene") return d.scenes.find((s) => s.id === t.sceneId)?.refMediaIds[0] ?? null;
+  if (t.kind === "voice") return null; // 音色指针在 char.voice 上，不是这套版本历史认的槽位
   const shot = findShot(project, t.shotId);
   if (!shot) return null;
   return t.kind === "keyframe" ? frameMediaId(shot, t.frameType) : (shot.videoMediaIds[0] ?? null);

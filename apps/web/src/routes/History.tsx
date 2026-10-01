@@ -15,6 +15,7 @@ import { VersionHistory } from "../components/VersionHistory";
 import { ScriptVersionList } from "../components/ScriptVersionList";
 import { useMediaVersions, useProject, useProjects, useScriptVersions, useVersionMutations, resyncMediaIndex } from "../lib/hooks";
 import { useApi } from "../lib/apiClient";
+import { IS_MOCK } from "../lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { flushSaves, patchProject } from "../lib/localStores";
 import { setCurrent, targetFromGroup } from "../lib/versions";
@@ -97,11 +98,13 @@ function MediaTab({ bucket, projectId, rows, loading }: { bucket: VersionBucket;
   const { data: projects } = useProjects();
   const muts = useVersionMutations(projectId);
 
-  // 一个项目一次查询，分组在内存里做：逐张卡片查就是 N+1
+  // 一个项目一次查询，分组在内存里做：逐张卡片查就是 N+1。
+  // 键用服务端回传的 groupValue，不在这里重算：无标签的行服务端是按 jobs/<任务目录> 各自成组的，
+  // 客户端只按 refId 算就会把它们塌进同一张卡，卡上的 V 号立刻对不上（真库实测：3 行两个组显示成一组）
   const groups = useMemo(() => {
     const map = new Map<string, Media[]>();
     for (const m of rows ?? []) {
-      const key = `${m.projectId ?? ""}|${m.kind}|${m.role ?? ""}|${m.refId ?? ""}`;
+      const key = `${m.projectId ?? ""}|${m.kind}|${m.role ?? ""}|${m.groupValue ?? m.refId ?? m.id}`;
       (map.get(key) ?? map.set(key, []).get(key)!).push(m);
     }
     return [...map.entries()];
@@ -143,7 +146,7 @@ function MediaTab({ bucket, projectId, rows, loading }: { bucket: VersionBucket;
     <div className="space-y-3">
       {groups.map(([key, list]) => {
         const head = list[0];
-        const label = head.title ?? head.refId ?? key;
+        const label = head.title ?? head.refId ?? (head.groupValue ? `未打标签的产物 · ${head.groupValue}` : key);
         const canSet = isLocal(projects, head.projectId);
         return (
           <Panel
@@ -182,9 +185,15 @@ function MediaTab({ bucket, projectId, rows, loading }: { bucket: VersionBucket;
         );
       })}
 
-      <Modal open={!!preview} onClose={() => setPreview(null)} width={880} title={preview ? `V${preview.version ?? "?"} · ${preview.title ?? preview.refId ?? ""}` : "预览"}>
+      <Modal open={!!preview} onClose={() => setPreview(null)} width={880} title={preview ? `V${preview.version ?? "?"} · ${preview.title ?? preview.refId ?? "未打标签的产物"}` : "预览"}>
         {preview?.kind === "video" ? <VideoPreview media={preview ?? undefined} /> : <ImagePreview media={preview ?? undefined} alt="版本预览" />}
-        {preview?.kind === "video" && <p className="mt-2 text-caption text-ink-mute">演示模式没有真文件，读不回来就是这句 —— 接上后端再点就能播。</p>}
+        {preview?.kind === "video" && (
+          <p className="mt-2 text-caption text-ink-mute">
+            {IS_MOCK
+              ? "演示模式没有真文件，读不回来就是这句 —— 接上后端再点就能播。"
+              : "读不回来一般是这条产物不在当前这个媒体库里（换了实例、或它属于另一台机器）。"}
+          </p>
+        )}
       </Modal>
 
       <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
@@ -232,6 +241,7 @@ function currentIdOf(project: Project | undefined, rows: Media[]): string | null
   if (target.kind === "variation")
     return d.characters.find((c) => c.id === target.characterId)?.variations.find((v) => v.id === target.variationId)?.refMediaIds[0] ?? null;
   if (target.kind === "scene") return d.scenes.find((s) => s.id === target.sceneId)?.refMediaIds[0] ?? null;
+  if (target.kind === "voice") return null; // 音色不挂在镜头与 refMediaIds 上，这里没有它的当前版
   const shot = d.shots.find((s) => s.id === target.shotId);
   if (!shot) return null;
   if (target.kind === "video") return shot.videoMediaIds[0] ?? null;

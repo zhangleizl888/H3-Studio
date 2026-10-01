@@ -9,6 +9,7 @@ import type {
   ScriptVersionRow,
   TrashItem,
   User,
+  WorkflowModelOptions,
 } from "./types";
 import * as local from "./localStores";
 import { accessToken, clearTokens, devAutoLogin, refreshTokenValue, setTokens } from "./tokens";
@@ -28,10 +29,12 @@ class HttpError extends Error {
 
 async function raw(path: string, init?: RequestInit): Promise<Response> {
   const token = accessToken();
+  // FormData 不能自己写 Content-Type：boundary 必须由浏览器补，写了就变成非法请求体
+  const isForm = typeof FormData !== "undefined" && init?.body instanceof FormData;
   return fetch(`${BASE}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
@@ -133,6 +136,7 @@ function jobBody(r: GenerateRequest) {
     projectKey: r.projectId,
     instanceId: r.instanceId,
     workflowId: r.workflowId,
+    models: r.models,
     priority: r.priority ?? 100,
     meta: r.meta,
   };
@@ -158,6 +162,7 @@ function toMedia(raw: Record<string, unknown>, projectId: string): Media {
     // 下面这几项只有 /api/media-versions 与 /api/trash 会给；/api/media 返回的是"活行"
     version: (raw.version as number) ?? null,
     versionCount: (raw.versionCount as number) ?? null,
+    groupValue: (raw.groupValue as string) ?? null,
     deletedAt: (raw.deletedAt as string) ?? null,
     purgeAfter: (raw.purgeAfter as string) ?? null,
     daysLeft: (raw.daysLeft as number) ?? null,
@@ -295,21 +300,24 @@ export const httpApi: Api = {
     validate: (graph, instanceId) => req("/api/workflows/validate", { method: "POST", body: j({ graph, instance_id: instanceId }) }),
     /** 装了节点包 / 换了实例之后重算一次：从原始导出重改写，不累积上一次的改动 */
     rescan: (id, instanceId) =>
-      req<{ workflow: Record<string, unknown>; report: Record<string, unknown> }>(
+      req(
         `/api/workflows/${id}/rescan${instanceId ? `?instance_id=${encodeURIComponent(instanceId)}` : ""}`,
         { method: "POST" },
       ),
-    patch: (id, body) => req<Record<string, unknown>>(`/api/workflows/${id}`, { method: "PATCH", body: j(body) }),
+    patch: (id, body) => req(`/api/workflows/${id}`, { method: "PATCH", body: j(body) }),
     /** 只排序不建任务：这次任务会挑中哪条、凭什么是它 */
     selectPreview: (kind, slots, instanceId) =>
-      req<{ candidates: { id: number; name: string; score: number; reasons: string[] }[]; provided: string[]; fallbackTemplate: string | null }>(
-        `/api/workflows/select?kind=${encodeURIComponent(kind)}&slots=${encodeURIComponent(JSON.stringify(slots))}${
-          instanceId ? `&instance_id=${encodeURIComponent(instanceId)}` : ""
-        }`,
-      ),
+      req(`/api/workflows/select?kind=${encodeURIComponent(kind)}&slots=${encodeURIComponent(JSON.stringify(slots))}${
+        instanceId ? `&instance_id=${encodeURIComponent(instanceId)}` : ""
+      }`),
     remove: (id) => req(`/api/workflows/${id}`, { method: "DELETE" }),
     export: (id, format) => req(`/api/workflows/${id}/export?format=${format}`),
     slots: (id) => req(`/api/workflows/${id}/slots`),
+    /** 这条工作流在那台实例上能换哪些权重。清单是实例报的，不是前端猜的 */
+    modelOptions: (id, instanceId) =>
+      req<WorkflowModelOptions>(
+        `/api/workflows/${encodeURIComponent(id)}/models${instanceId ? `?instance_id=${encodeURIComponent(instanceId)}` : ""}`,
+      ),
     nodeOverrides: (id, values) => req(`/api/workflows/${id}/node-overrides`, { method: "POST", body: j(values) }),
     testRun: (id, instanceId) => req(`/api/workflows/${id}/test`, { method: "POST", body: j({ instanceId }) }),
   },
@@ -350,8 +358,17 @@ export const httpApi: Api = {
       return local.cacheUrl(key, blob);
     },
     async put(file, role, refId, projectId) {
-      const kind = file.type.startsWith("video") ? "ref_video" : file.type.startsWith("audio") ? "ref_audio" : "ref_image";
-      return local.putUpload(projectId, file, role, refId ?? null, kind);
+      // 必须真落服务端：出图/出片时 ComfyUI 要从磁盘读它，而 generate.ts 的 serverMediaIds()
+      // 只认纯数字 id —— 只存进 IndexedDB 的上传永远当不了参考素材（音频也是，音色参考同理）。
+      const fd = new FormData();
+      fd.append("file", file, file instanceof File ? file.name : "upload");
+      const q = new URLSearchParams({ role });
+      if (refId) q.set("ref_id", refId);
+      if (projectId) q.set("project_key", projectId);
+      const row = await req<Record<string, unknown>>(`/api/media/upload?${q}`, { method: "POST", body: fd });
+      const m = toMedia(row, projectId ?? "");
+      await local.saveMedia(m);
+      return m;
     },
     async adopt(m) {
       return local.saveMedia(m);
@@ -449,7 +466,9 @@ export const httpApi: Api = {
         retentionDays: r.retentionDays,
         totalBytes: r.totalBytes,
         items: r.items.map((it) => {
-          const media = it.kind === "media" ? toMedia(it, (it.projectKey as string) ?? "") : undefined;
+          // 顶层 kind 是这张 union 的判别式（media|script），媒体自己是 image/video —— 那份在 bucket 里。
+          // 直接把它喂给 toMedia 会得到 kind:"media"，预览就认不出这是图还是片
+          const media = it.kind === "media" ? toMedia({ ...it, kind: it.bucket }, (it.projectKey as string) ?? "") : undefined;
           return { ...(it as unknown as TrashItem), media };
         }),
       };

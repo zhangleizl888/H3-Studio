@@ -12,6 +12,7 @@ import type {
   ParsedScript,
   ProbeReport,
   Project,
+  RescanReport,
   ScriptVersionRow,
   ScriptVersionSource,
   TrashList,
@@ -19,6 +20,7 @@ import type {
   VersionBucket,
   VisualStyle,
   Workflow,
+  WorkflowModelOptions,
   WorkflowSlot,
 } from "./types";
 
@@ -109,11 +111,13 @@ export interface Api {
     remove(id: string): Promise<void>;
     export(id: string, format: "api" | "ui"): Promise<string>;
     slots(id: string): Promise<WorkflowSlot[]>;
+    /** 这条工作流在那台实例上可换哪些权重（清单只来自实例的 /object_info，不是前端硬编码） */
+    modelOptions(id: string, instanceId?: string): Promise<WorkflowModelOptions>;
     /** slots 投影成 RunningHub 的 nodeInfoList 骨架 */
     nodeOverrides(id: string, values: Record<string, unknown>): Promise<NodeOverride[]>;
     testRun(id: string, instanceId: string): Promise<Job>;
     /** 装了节点包 / 换了实例之后重算：后端从原始导出重改写，不累积上一次改动 */
-    rescan(id: string, instanceId?: string): Promise<{ workflow: Workflow; report: ImportReport }>;
+    rescan(id: string, instanceId?: string): Promise<{ workflow: Workflow; report: RescanReport }>;
     /** 改「要不要参与自动选」与优先级 */
     patch(id: string, body: { autoSelect?: boolean; priority?: number; description?: string; tags?: string[] }): Promise<Workflow>;
     /** 只排序不建任务：这次任务会挑中哪条、凭什么是它 */
@@ -260,9 +264,11 @@ export interface GenerateRequest {
   workflowId?: number;
   slots: Record<string, unknown>;
   instanceId?: string;
-  kind?: "image" | "video" | "video_chain" | "upscale" | "workflow_test";
+  kind?: "image" | "video" | "video_chain" | "upscale" | "workflow_test" | "audio";
   title?: string;
   priority?: number;
+  /** 换权重：键取 ModelSlot.key（"节点号.字段名"），值必须是那台实例报出来的文件名 */
+  models?: Record<string, string>;
   /** 产物落库时打成谁的 —— 角色定妆照 / 场景图 / 某镜的首帧。promptMode 让后端能核对提示词形状 */
   meta?: { role: string; refId: string; promptMode?: string };
 }
@@ -275,7 +281,8 @@ export interface JobPlanRow {
   kind: string;
   instance: { id: string; label: string; placement: string; protocol: string; probeOk: boolean | null; circuitOpen: boolean } | null;
   slots: Record<string, unknown>;
-  derived: Record<string, string | number | null>;
+  /** 后端 derived 的形状随路径而变（工作流名、候选、耗时、换的权重…），渲染处按类型判 */
+  derived: Record<string, unknown>;
   problems: string[];
   blocked: boolean;
 }

@@ -13,6 +13,7 @@ const KIND_ZH: Record<JobKind, string> = {
   detect_shots: "镜头切分",
   assemble: "合成",
   workflow_test: "试运行",
+  audio: "音色",
 };
 
 const RESOURCE_ZH: Record<NonNullable<RenderLog["resourceType"]>, string> = {
@@ -21,6 +22,7 @@ const RESOURCE_ZH: Record<NonNullable<RenderLog["resourceType"]>, string> = {
   scene: "场景",
   keyframe: "关键帧",
   video: "视频段",
+  voice: "音色",
   "script-parsing": "剧本拆解",
   export: "导出",
 };

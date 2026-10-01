@@ -138,8 +138,8 @@ function WorkflowList({
                   <div className="flex flex-wrap items-center gap-1">
                     <Badge>{w.isBuiltin ? "内置" : "导入"}</Badge>
                     <Badge>{w.sourceFormat === "api" ? "API 格式" : "UI 格式"}</Badge>
-                    {(w.gaps?.length ?? 0) > 0 ? <Badge tone="warn">本机缺 {w.gaps!.length} 处</Badge> : <Badge tone="ok">本机节点齐</Badge>}
-                    {w.verifiedAt && <Badge tone="ok">真机跑通过</Badge>}
+                    {(w.gaps?.length ?? 0) > 0 ? <Badge tone="warn">本机缺 {w.gaps!.length} 处</Badge> : <Badge tone="good">本机节点齐</Badge>}
+                    {w.verifiedAt && <Badge tone="good">真机跑通过</Badge>}
                     {w.autoSelect === false && <Badge>不参与自动选</Badge>}
                     {only && <Badge tone="warn">仅 RunningHub</Badge>}
                     {w.tags.map((t) => (
@@ -238,8 +238,7 @@ function Inspector({
     setScanMsg("正在按实例的 /object_info 重改写…");
     wfMut.rescan.mutate({ id: w.id }, {
       onSuccess: (res) => {
-        const rep = res.report as unknown as { gaps?: unknown[]; adaptations?: unknown[] };
-        setScanMsg(`重扫完成：改写 ${(rep.adaptations ?? []).length} 处、还缺 ${(rep.gaps ?? []).length} 处`);
+        setScanMsg(`重扫完成：改写 ${res.report.adaptations.length} 处、还缺 ${res.report.gaps.length} 处`);
       },
       onError: (e) => setScanMsg(`重扫失败：${(e as Error).message}`.slice(0, 180)),
     });
@@ -267,9 +266,9 @@ function Inspector({
             <Badge>{wf.isBuiltin ? "内置" : "导入"}</Badge>
             <Badge>源格式 {wf.sourceFormat}</Badge>
             <Badge>{wf.executesOn === "cloud_runninghub" ? "只能云端跑" : wf.executesOn === "local" ? "本机跑" : "本机与云端都能跑"}</Badge>
-            {(wf.gaps?.length ?? 0) > 0 ? <Badge tone="warn">本机缺 {wf.gaps!.length} 处</Badge> : <Badge tone="ok">本机节点齐</Badge>}
+            {(wf.gaps?.length ?? 0) > 0 ? <Badge tone="warn">本机缺 {wf.gaps!.length} 处</Badge> : <Badge tone="good">本机节点齐</Badge>}
             {!!(wf.adaptations?.length ?? 0) && <Badge>改写 {wf.adaptations!.length} 处</Badge>}
-            {wf.verifiedAt ? <Badge tone="ok">真机跑通过</Badge> : <Badge tone="warn">还没跑过</Badge>}
+            {wf.verifiedAt ? <Badge tone="good">真机跑通过</Badge> : <Badge tone="warn">还没跑过</Badge>}
             {rhOnly && <Badge tone="warn">只能跑在 RunningHub 实例上</Badge>}
           </div>
           {wf.description && <p className="text-note leading-relaxed text-ink-dim">{wf.description}</p>}

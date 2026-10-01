@@ -6,6 +6,7 @@
  */
 
 import type { GenerateRequest } from "./api";
+import { presetToRequest } from "./preset";
 import type { Character, Media, Project, RenderLog, Scene, Shot, Variation } from "./types";
 import {
   H3_SIZES,
@@ -21,32 +22,27 @@ import {
 } from "./prompts";
 
 /**
- * 出图 / 出片用哪张图：项目配置里存的可以是内置模板名、工作流库的数字 id，或 "auto"。
+ * 出图 / 出片 / 出音色用哪条工作流、哪台实例、哪颗权重：实体上的预设优先，缺省回落项目默认。
  *
- * 数字 → 显式指定库里那条（后端按它填槽，仍会先核对实例跑不跑得动）；
- * "auto" → 让后端按这次任务的形状（有没有参考图/视频、要不要尾帧）从库里挑；
- * 其它 → 内置模板名，保持老项目原样。
- * 库里一条都挑不出时后端会回落内置模板，并在参数表里写明是回落 —— 前端不重复这套判断。
+ * 具体解析在 lib/preset.ts（与下拉组件共用同一套判据，两处两套说法就会出现
+ * 「界面显示 A、请求发出去是 B」）。库里一条都挑不出时后端会回落内置模板并在参数表里写明，
+ * 前端不重复那套判断。
  */
-export function templateFor(project: Project, family: "image" | "video"): { template: string; workflowId?: number } {
-  const raw = String((family === "image" ? project.config.imageTemplate : project.config.videoTemplate) || "auto");
-  if (/^\d+$/.test(raw)) return { template: "auto", workflowId: Number(raw) };
-  return { template: raw || "auto" };
-}
 
 /** 生成对象：一个联合标签，决定产物挂回哪里 */
 export type GenTarget =
   | { kind: "character"; characterId: string }
   | { kind: "variation"; characterId: string; variationId: string }
   | { kind: "scene"; sceneId: string }
+  | { kind: "voice"; characterId: string }
   | { kind: "keyframe"; shotId: string; frameType: "start" | "end" }
   | { kind: "video"; shotId: string };
 
 export const roleFor = (t: GenTarget): string =>
-  t.kind === "character" ? "character" : t.kind === "variation" ? "variation" : t.kind === "scene" ? "scene" : t.kind === "keyframe" ? `keyframe_${t.frameType}` : "video";
+  t.kind === "character" ? "character" : t.kind === "variation" ? "variation" : t.kind === "scene" ? "scene" : t.kind === "voice" ? "voice" : t.kind === "keyframe" ? `keyframe_${t.frameType}` : "video";
 
 export const refFor = (t: GenTarget): string =>
-  t.kind === "character" ? t.characterId : t.kind === "variation" ? `${t.characterId}:${t.variationId}` : t.kind === "scene" ? t.sceneId : t.kind === "keyframe" ? `${t.shotId}:${t.frameType}` : t.shotId;
+  t.kind === "character" || t.kind === "voice" ? t.characterId : t.kind === "variation" ? `${t.characterId}:${t.variationId}` : t.kind === "scene" ? t.sceneId : t.kind === "keyframe" ? `${t.shotId}:${t.frameType}` : t.shotId;
 
 export function findShot(project: Project, shotId: string): Shot | undefined {
   return project.data.shots.find((s) => s.id === shotId);
@@ -74,8 +70,7 @@ export function characterRequest(project: Project, char: Character): GenerateReq
   const { width, height } = imageSize(project);
   return {
     projectId: project.id,
-    ...templateFor(project, "image"),
-    instanceId: project.config.imageInstanceId ?? undefined,
+    ...presetToRequest(project, "image", char.preset),
     kind: "image",
     title: `定妆 · ${char.name}`,
     slots: {
@@ -95,8 +90,7 @@ export function variationRequest(project: Project, char: Character, variation: V
   const { width, height } = imageSize(project);
   return {
     projectId: project.id,
-    ...templateFor(project, "image"),
-    instanceId: project.config.imageInstanceId ?? undefined,
+    ...presetToRequest(project, "image", variation.preset ?? char.preset),
     kind: "image",
     title: `变体 · ${char.name} / ${variation.name}`,
     slots: {
@@ -115,8 +109,7 @@ export function sceneRequest(project: Project, scene: Scene): GenerateRequest {
   const { width, height } = imageSize(project);
   return {
     projectId: project.id,
-    ...templateFor(project, "image"),
-    instanceId: project.config.imageInstanceId ?? undefined,
+    ...presetToRequest(project, "image", scene.preset),
     kind: "image",
     title: `场景 · ${scene.name}`,
     slots: {
@@ -140,8 +133,7 @@ export function keyframeRequest(project: Project, shot: Shot, frameType: "start"
   const existing = shot.keyframes?.find((k) => k.type === frameType);
   return {
     projectId: project.id,
-    ...templateFor(project, "image"),
-    instanceId: project.config.imageInstanceId ?? undefined,
+    ...presetToRequest(project, "image", shot.imagePreset ?? scene?.preset),
     kind: "image",
     title: `${frameType === "start" ? "首帧" : "尾帧"} · 镜 ${shot.index}`,
     slots: {
@@ -236,7 +228,7 @@ export function videoRequest(project: Project, shot: Shot): GenerateRequest {
   const refEnd = serverMediaIds([endFrameOf(shot)]);
   return {
     projectId: project.id,
-    ...templateFor(project, "video"),
+    ...presetToRequest(project, "video", shot.preset),
     instanceId,
     kind: "video",
     title: `出片 · 镜 ${shot.index}`,
@@ -293,6 +285,7 @@ export function attachResult(project: Project, target: GenTarget, media: Media[]
     s.status = "completed";
     return true;
   }
+  if (target.kind === "voice") return false; // 音色产物挂在 char.voice 上，不落镜头与 refMediaIds
   const shot = findShot(project, target.shotId);
   if (!shot) return false;
   if (target.kind === "keyframe") {
@@ -315,7 +308,7 @@ export function markFailed(project: Project, target: GenTarget, message: string)
   const log: RenderLog = {
     ts: new Date().toISOString(),
     shotId: target.kind === "keyframe" || target.kind === "video" ? target.shotId : "",
-    kind: (target.kind === "video" ? "video" : "image") as "video" | "image",
+    kind: target.kind === "video" ? "video" : target.kind === "voice" ? "audio" : "image",
     status: "failed" as const,
     instanceId: "",
     jobId: "",
@@ -334,6 +327,9 @@ export function markFailed(project: Project, target: GenTarget, message: string)
   } else if (target.kind === "variation") {
     const v = data.characters.find((x) => x.id === target.characterId)?.variations.find((x) => x.id === target.variationId);
     if (v) v.status = "failed";
+  } else if (target.kind === "voice") {
+    const voice = data.characters.find((x) => x.id === target.characterId)?.voice;
+    if (voice) voice.status = "failed";
   } else {
     const shot = findShot(project, target.shotId);
     if (shot && target.kind === "video") shot.state = "failed";
@@ -355,6 +351,9 @@ export function markGenerating(project: Project, target: GenTarget): void {
   } else if (target.kind === "variation") {
     const v = data.characters.find((x) => x.id === target.characterId)?.variations.find((x) => x.id === target.variationId);
     if (v) v.status = "generating";
+  } else if (target.kind === "voice") {
+    const voice = data.characters.find((x) => x.id === target.characterId)?.voice;
+    if (voice) voice.status = "generating";
   } else {
     const shot = findShot(project, target.shotId);
     if (!shot) return;

@@ -674,7 +674,7 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
             {current === "auto" && <Check className="h-2.5 w-2.5" aria-hidden />}
           </span>
           <span className="text-body font-semibold">自动：按任务从工作流库挑</span>
-          <Badge tone={current === "auto" ? "ok" : undefined}>推荐</Badge>
+          <Badge tone={current === "auto" ? "good" : undefined}>推荐</Badge>
           <span className="text-caption text-ink-mute">
             每次派发前按「这次任务给了什么」打分：有参考视频就走动作迁移，只给首尾帧就走一键出片；库里挑不出才回落内置模板，并在参数表里写明是回落。
           </span>
@@ -714,7 +714,7 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
                     <span className="text-body font-semibold">{w.name}</span>
                     <Badge>{w.isBuiltin || w.id.startsWith("builtin:") ? "内置" : "导入"}</Badge>
                     {gaps.length > 0 && <Badge tone="warn">缺 {gaps.length} 处</Badge>}
-                    {w.verifiedAt && <Badge tone="ok">本机跑通过</Badge>}
+                    {w.verifiedAt && <Badge tone="good">本机跑通过</Badge>}
                     {w.tags?.slice(0, 3).map((t) => (
                       <span key={t} className="mono rounded-panel border border-rule-soft px-1.5 py-[1px] text-micro text-ink-mute">
                         {t}

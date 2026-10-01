@@ -194,7 +194,7 @@ export default function Trash() {
         </Panel>
       )}
 
-      <Modal open={!!preview} onClose={() => setPreview(null)} width={880} title={preview ? `V${preview.version} · ${preview.title ?? preview.refId ?? "剧本"}` : "预览"}>
+      <Modal open={!!preview} onClose={() => setPreview(null)} width={880} title={preview ? `V${preview.version} · ${preview.title ?? preview.refId ?? (preview.kind === "script" ? "剧本" : "未打标签的产物")}` : "预览"}>
         {preview?.kind === "script" ? (
           <pre className="max-h-[62vh] overflow-auto whitespace-pre-wrap break-words rounded-ctl bg-inset p-3 text-note leading-relaxed">
             {preview.textPreview || "（这一版没有留下正文）"}
@@ -206,7 +206,7 @@ export default function Trash() {
             <ImagePreview media={preview.media} alt="回收站预览" />
           )
         ) : (
-          <p className="py-8 text-center text-note text-ink-mute">这一项读不回内容：演示模式没有真文件，接上后端再试。</p>
+          <p className="py-8 text-center text-note text-ink-mute">这一项没带回可显示的产物数据：列表里的行只有记录，文件要么在本机库里读不出，要么这条本来就不是图片/成片。</p>
         )}
       </Modal>
 

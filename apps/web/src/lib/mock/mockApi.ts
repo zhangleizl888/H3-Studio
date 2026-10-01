@@ -5,6 +5,7 @@ import type {
   Job,
   LlmBackend,
   Media,
+  ModelSlot,
   ProbeReport,
   Project,
   ScriptVersionRow,
@@ -76,8 +77,13 @@ const clone = <T>(v: T): T => structuredClone(v);
 const RETENTION_DAYS = 100;
 const DAY_MS = 86_400_000;
 
-/** 分组口径和后端一致：(项目, kind, role, ref_id)。上传的参考图 kind 是 ref_*，天然不进版本 */
-const groupKey = (m: Media) => `${m.projectId ?? ""}|${m.kind}|${m.role ?? ""}|${m.refId ?? ""}`;
+/**
+ * 分组键里 ref_id 那一段，与后端 `_grp()` 同一条规则：有 ref_id 用它；没打标签的行按
+ * `jobs/<任务目录>` 各自成组，同一项目的多个无标签产物不会塌成一组。
+ */
+const groupValueOf = (m: Media) => m.refId ?? (/^jobs\/[^/]+/.test(m.path ?? "") ? m.path!.split("/")[1] : `job-${m.id}`);
+/** 分组口径和后端一致：(项目, kind, role, 分组键)。上传的参考图 kind 是 ref_*，天然不进版本 */
+const groupKey = (m: Media) => `${m.projectId ?? ""}|${m.kind}|${m.role ?? ""}|${groupValueOf(m)}`;
 /**
  * 演示模式里"算不算生成产物"的口径。
  *
@@ -120,6 +126,7 @@ const withVersion = (m: Media): Media => ({
   ...m,
   version: versionOf(m),
   versionCount: store.media.filter((x) => groupKey(x) === groupKey(m)).length,
+  groupValue: groupValueOf(m),
   ...purgeFields(m.deletedAt ?? null),
 });
 
@@ -625,6 +632,50 @@ export const mockApi: Api = {
       const w = store.workflows.find((x) => x.id === id);
       return clone(w?.slots ?? []);
     },
+    /**
+     * 原型模式没有实例可问，所以这里给的是**演示清单**，界面上会带一句「原型模式」。
+     * 真后端那条走 GET /api/workflows/{id}/models，清单来自实例的 /object_info。
+     */
+    async modelOptions(id, instanceId) {
+      const w = store.workflows.find((x) => x.id === id);
+      const kind = w?.taskKind ?? w?.family ?? "video";
+      const preset =
+        kind === "image"
+          ? [
+              { node: "501", field: "unet_name", classType: "UNETLoader", label: "Qwen-Image DiT", role: "底模", options: ["qwen_image_2.1_int8_convrot.safetensors", "qwen_image_2.1_bf16.safetensors", "flux2_klein_base_fp8.safetensors"] },
+              { node: "502", field: "clip_name", classType: "CLIPLoader", label: "文本编码器", role: "文本编码器", options: ["qwen3vl_8b_bf16.safetensors"] },
+              { node: "503", field: "vae_name", classType: "VAELoader", label: "VAE", role: "VAE", options: ["qwen_image_2.1_vae_bf16.safetensors"] },
+            ]
+          : kind === "audio"
+            ? [{ node: "43", field: "model_name", classType: "FB_Qwen3TTSVoiceClone", label: "TTS 模型", role: "模型", options: ["qwen3_tts_base.safetensors"] }]
+            : [
+                { node: "127", field: "unet_name", classType: "UNETLoader", label: "H3 底模", role: "底模", options: ["MiniMax_H3_FL2VA_pruned_int8.safetensors", "MiniMax_H3_REF2VA_pruned_int8.safetensors"] },
+                { node: "128", field: "clip_name", classType: "CLIPLoader", label: "H3 文本编码器", role: "文本编码器", options: ["minimax_h3_qwen3vl_32b_int8.safetensors"] },
+                { node: "119", field: "vae_name", classType: "VAELoader", label: "视频 VAE", role: "VAE", options: ["minimax_h3_video_vae.safetensors"] },
+                { node: "140", field: "lora_name", classType: "LoraLoaderModelOnly", label: "Turbo LoRA（只在加速档挂得上）", role: "LoRA 适配器", options: ["MiniMaxH3_FL2V_Turbo_8step_v10_ComfyUI_bf16.safetensors"] },
+              ];
+      const slots: ModelSlot[] = preset.map((p) => ({
+        key: `${p.node}.${p.field}`,
+        node: p.node,
+        field: p.field,
+        classType: p.classType,
+        label: p.label,
+        role: p.role,
+        current: p.options[0] ?? "",
+        options: p.options,
+        missing: false,
+      }));
+      return {
+        workflowId: id,
+        workflowName: w?.name ?? id,
+        instanceId: instanceId ?? store.instances.find((i) => i.placement === "local")?.id ?? "",
+        placement: "local",
+        protocol: "comfy_native",
+        primary: slots[0]?.key ?? null,
+        slots,
+        notes: ["原型模式：这份清单是演示数据，没有问过实例"],
+      };
+    },
     async nodeOverrides(id, values) {
       const w = store.workflows.find((x) => x.id === id)!;
       return (w.slots ?? [])
@@ -641,7 +692,18 @@ export const mockApi: Api = {
     async rescan(id) {
       await delay(600);
       const w = store.workflows.find((x) => x.id === id)!;
-      return { workflow: clone(w), report: { valid: true, sourceFormat: w.sourceFormat, unknownNodes: [], missingModels: [], warnings: ["原型模式不重扫，用的是上一次存下来的改写结果"] } as ImportReport };
+      // 原型不真的按实例重改写：把库里上一次扫描的结果原样报回去，界面上的条数都是真数据
+      return {
+        workflow: clone(w),
+        report: {
+          adaptations: w.adaptations ?? [],
+          gaps: w.gaps ?? [],
+          alignment: [],
+          signals: w.signals ?? [],
+          executesOn: String(w.executesOn ?? "any"),
+          taskKind: String(w.taskKind ?? w.family),
+        },
+      };
     },
     async patch(id, body) {
       await delay();
