@@ -12,10 +12,13 @@ import { Badge, Button, Empty, Modal, Panel, Select, Skeleton, Tabs } from "../c
 import { ConfirmSheet, type ConfirmRequest } from "./project/assets/common";
 import { ImagePreview, VideoPreview } from "./project/director/common";
 import { VersionHistory } from "../components/VersionHistory";
-import { useMediaVersions, useProject, useProjects, useScriptVersionActions, useScriptVersions, useVersionMutations } from "../lib/hooks";
+import { ScriptVersionList } from "../components/ScriptVersionList";
+import { useMediaVersions, useProject, useProjects, useScriptVersions, useVersionMutations, resyncMediaIndex } from "../lib/hooks";
+import { useApi } from "../lib/apiClient";
+import { useQueryClient } from "@tanstack/react-query";
 import { flushSaves, patchProject } from "../lib/localStores";
 import { setCurrent, targetFromGroup } from "../lib/versions";
-import type { Media, Project, ScriptVersionRow, VersionBucket } from "../lib/types";
+import type { Media, Project, VersionBucket } from "../lib/types";
 
 type TabKey = VersionBucket;
 
@@ -71,6 +74,7 @@ export default function History() {
               ))}
             </Select>
           </label>
+          {projectId && <ResyncButton projectId={projectId} />}
         </div>
       </header>
 
@@ -253,125 +257,54 @@ function ScriptTab({ projectIds }: { projectIds: string[] }) {
   return (
     <div className="space-y-3">
       {keys.map((id) => (
-        <ScriptVersions key={id} projectId={id} />
+        <ScriptVersionList key={id} projectId={id} />
       ))}
     </div>
   );
 }
 
-function ScriptVersions({ projectId }: { projectId: string }) {
-  const { data: project } = useProject(projectId);
-  const { data: rows } = useScriptVersions(projectId, true);
-  const muts = useVersionMutations(projectId);
-  // 切版本走 useScriptVersionActions.switchTo，不在这里自己拼：它会先比对工作正文和
-  // 当前版是否一致，用户手改过就先把那份手改存成一版再切。少这一步，切版本就是吃掉手打的字。
-  const actions = useScriptVersionActions(projectId);
-  const [reading, setReading] = useState<ScriptVersionRow | null>(null);
-  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
-  const [switching, setSwitching] = useState(false);
-  // 所有 hook 必须排在早退之前，否则 hook 顺序随渲染变化，整页直接崩
-  const ordered = [...(rows ?? [])].sort((a, b) => b.version - a.version);
+/**
+ * 「同步产物索引」：换浏览器、清过缓存、或在别的机器上出过片之后，项目实体里的指针会指向
+ * 哪都不存在的产物（卡片亮着破图）。这里显式补登记 + 摘坏指针。
+ *
+ * 做成按钮而不是开机自动跑：它在改用户的项目实体，得让人知道它动了什么。
+ */
+function ResyncButton({ projectId }: { projectId: string }) {
+  const api = useApi();
+  const qc = useQueryClient();
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  if (!ordered.length) {
-    return <Panel title={project?.name ?? projectId}><Empty title="没有版本记录" hint="AI 续写、改写或拆解成功之后会自动存一版。" /></Panel>;
-  }
-
-  const jump = (v: ScriptVersionRow) => {
-    if (!project) return;
-    setSwitching(true);
-    void actions
-      .switchTo(v, {
-        workingText: project.data.rawScript,
-        workingWrittenAt: project.data.scriptWrittenAt ?? project.updatedAt,
-        currentText: (rows ?? []).find((x) => x.isCurrent)?.text ?? null,
+  const run = () => {
+    setBusy(true);
+    setNote(null);
+    void resyncMediaIndex(api, projectId)
+      .then((r) => {
+        setNote(`补登记 ${r.adopted} 项，摘掉 ${r.dangling} 个失效指针`);
+        qc.invalidateQueries({ queryKey: ["projects", projectId] });
+        qc.invalidateQueries({ queryKey: ["media", projectId] });
+        qc.invalidateQueries({ queryKey: ["mediaVersions"] });
       })
-      .catch((e) => console.error("设为当前失败：", e))
-      .finally(() => setSwitching(false));
+      .catch((e) => setNote(`同步失败：${String(e instanceof Error ? e.message : e)}`))
+      .finally(() => setBusy(false));
   };
 
   return (
-    <Panel title={project?.name ?? projectId} actions={<span className="label mono">{ordered.filter((v) => !v.deletedAt).length} 版可用</span>}>
-      <ul className="divide-y divide-hairline overflow-hidden rounded-ctl border border-rule-soft">
-        {ordered.map((v) => (
-          <li key={v.uuid} className="flex items-center gap-2.5 px-2 py-1.5">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mono text-note text-ink">V{v.version}</span>
-                {v.isCurrent && <Badge tone="good">当前</Badge>}
-                {v.deletedAt && <Badge tone="warn">在回收站 · 还剩 {v.daysLeft ?? 0} 天</Badge>}
-                {v.backfilled && <Badge>补记</Badge>}
-                <span className="label">{v.source}</span>
-              </div>
-              <p className="truncate text-caption text-ink-mute" title={v.text}>
-                {v.text.replace(/\s+/g, " ").slice(0, 90) || "（空）"}
-              </p>
-              <p className="text-caption text-ink-mute">
-                {/* 显示时间用 writtenAt：补存的 V1 用的是正文上次保存的时间，不是入库时间 */}
-                {new Date(v.writtenAt).toLocaleString()} · {v.text.length} 字
-                {snapshotSize(v)}
-                {v.backfilled ? " · 补记（非生成时刻）" : ""}
-              </p>
-            </div>
-            <div className="flex flex-none items-center gap-1">
-              <Button size="sm" variant="ghost" onClick={() => setReading(v)}>
-                预览
-              </Button>
-              {v.deletedAt ? (
-                <Button size="sm" variant="quiet" onClick={() => void muts.restoreScript.mutateAsync({ uuid: v.uuid, projectId }).catch((e) => console.error(e))}>
-                  恢复
-                </Button>
-              ) : (
-                <>
-                  <Button size="sm" variant={v.isCurrent ? "ghost" : "default"} disabled={v.isCurrent || !project || switching} onClick={() => jump(v)}>
-                    {switching ? "切换中…" : "设为当前"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      setConfirm({
-                        title: `把 V${v.version} 移进生成回收站`,
-                        confirmLabel: "移进回收站",
-                        danger: true,
-                        body: <p className="text-note">编辑器里现在的正文<span className="text-ink">一个字都不会动</span>；这一版只是从历史里挪进回收站，{v.daysLeft ?? 100} 天后自动删除。</p>,
-                        onConfirm: () => {
-                          void muts.trashScript.mutateAsync({ uuid: v.uuid, projectId }).catch((e) => console.error(e));
-                          setConfirm(null);
-                        },
-                      })
-                    }
-                  >
-                    删除
-                  </Button>
-                </>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      {reading && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-scrim/70 p-4" role="dialog" aria-modal="true" aria-label={`V${reading.version} 正文`} onClick={() => setReading(null)}>
-          <div className="max-h-[86vh] w-full max-w-3xl overflow-auto rounded-sheet border border-rule bg-panel p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-subtitle font-semibold">V{reading.version}</span>
-              {reading.isCurrent && <Badge tone="good">当前</Badge>}
-              <span className="label ml-auto">{new Date(reading.writtenAt).toLocaleString()}</span>
-              <Button size="sm" variant="ghost" onClick={() => setReading(null)}>
-                关闭
-              </Button>
-            </div>
-            <pre className="whitespace-pre-wrap break-words rounded-ctl bg-inset p-3 text-note leading-relaxed">{reading.text}</pre>
-          </div>
-        </div>
+    <span className="flex items-center gap-1.5">
+      <Button
+        size="sm"
+        variant="ghost"
+        loading={busy}
+        title="把服务端还在的产物重新登记进本地索引，并摘掉指向已不存在对象的指针（只在选定的那一个项目上做）"
+        onClick={run}
+      >
+        同步产物索引
+      </Button>
+      {note && (
+        <span className="text-caption text-ink-mute" role="status">
+          {note}
+        </span>
       )}
-      <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
-    </Panel>
+    </span>
   );
 }
-
-const snapshotSize = (v: ScriptVersionRow) => {
-  const s = v.snapshot ?? {};
-  const n = [s.characters?.length ?? 0, s.scenes?.length ?? 0, s.shots?.length ?? 0];
-  return n.some((x) => x > 0) ? ` · 快照 ${n[0]} 角 / ${n[1]} 场 / ${n[2]} 镜` : "";
-};

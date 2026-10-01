@@ -9,10 +9,16 @@
  */
 
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { History as HistoryIcon, RotateCcw, Trash2 } from "lucide-react";
-import { Badge, Button, Empty, Progress } from "./ui";
-import { MediaImage } from "../routes/project/assets/common";
+import { Badge, Button, Empty, Modal, Progress } from "./ui";
+import { ConfirmSheet, MediaImage, type ConfirmRequest } from "../routes/project/assets/common";
+import { ImagePreview, VideoPreview } from "../routes/project/director/common";
 import { isStill } from "../lib/utils";
+import { currentIdFor, isLocalProject, setCurrent, targetFromGroup } from "../lib/versions";
+import { flushSaves, patchProject } from "../lib/localStores";
+import { useProject, useProjects, useVersionGroup, useVersionMutations } from "../lib/hooks";
 import type { Media } from "../lib/types";
 
 export interface VersionHistoryProps {
@@ -202,3 +208,96 @@ export function VersionBusy({ stage, progress }: { stage?: string | null; progre
 
 /** 这一版能不能画进 <img>。宿主自己做二次判断时用，别绕开组件里的 isStill */
 export const stillRenderable = (m: Media): boolean => isStill(m);
+
+/**
+ * 内嵌版面板：给它服务端的分组键 `(role, refId)`，它自己拉这一组、自己写实体指针。
+ *
+ * 三处宿主（资产预览、镜头抽屉的关键帧与成片）共用这一份，而不是各写一遍取数 +
+ * 各写一遍摘指针 —— 指针拓扑只允许有 lib/versions.ts 一个出口。
+ */
+export function VersionGroup({
+  projectId,
+  role,
+  refId,
+  aspect,
+  compact = true,
+  posterOf,
+  onPreview,
+  label = "版本",
+}: {
+  projectId: string;
+  role?: string | null;
+  refId?: string | null;
+  aspect?: string;
+  compact?: boolean;
+  posterOf?: (m: Media) => Media | undefined;
+  onPreview?: (m: Media) => void;
+  label?: string;
+}) {
+  const { data: rows } = useVersionGroup(projectId, role, refId);
+  const { data: project } = useProject(projectId);
+  const { data: projects } = useProjects();
+  const muts = useVersionMutations(projectId);
+  const qc = useQueryClient();
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [internal, setInternal] = useState<Media | null>(null);
+  const target = targetFromGroup(role, refId);
+  // 项目实体不在这台浏览器上时，指针写不了 —— 只能禁用，不能让 requireProject 抛错
+  const canSet = !!target && isLocalProject(projects, projectId);
+
+  if (!rows?.length) return null;
+
+  const applyCurrent = async (m: Media) => {
+    if (!target) return;
+    await flushSaves();
+    await patchProject(projectId, {}, (p) => setCurrent(p, target, m));
+    // 直接写 IndexedDB 的动作绕过 react-query，不手动失效就会出现「点了没反应」
+    qc.invalidateQueries({ queryKey: ["projects", projectId] });
+    qc.invalidateQueries({ queryKey: ["media", projectId] });
+    qc.invalidateQueries({ queryKey: ["mediaVersions"] });
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <VersionHistory
+        rows={rows}
+        currentId={project && target ? currentIdFor(project, target) : null}
+        compact={compact}
+        aspect={aspect}
+        canSetCurrent={canSet}
+        posterOf={posterOf}
+        onPreview={(m) => (onPreview ? onPreview(m) : setInternal(m))}
+        onSetCurrent={(m) => void applyCurrent(m).catch((e) => console.error("设为当前失败：", e))}
+        onTrash={(m) =>
+          setConfirm({
+            title: `把 ${label} V${m.version ?? "?"} 移进生成回收站`,
+            confirmLabel: "移进回收站",
+            danger: true,
+            body: (
+              <p className="text-note leading-relaxed">
+                这一版会从卡片、时间轴、导出、提示词页<span className="text-ink">一起消失</span>，只剩生成回收站里那一份；
+                如果它正是当前这一版，这里会退到剩下最新的一版。
+              </p>
+            ),
+            onConfirm: () => {
+              void muts.trashMedia.mutateAsync({ id: m.id, projectId }).catch((e) => console.error("移进回收站失败：", e));
+              setConfirm(null);
+            },
+          })
+        }
+        onRestore={(m) => void muts.restoreMedia.mutateAsync({ id: m.id, projectId }).catch((e) => console.error("恢复失败：", e))}
+      />
+      <div className="flex items-center gap-2">
+        <Link to={`/history?project=${encodeURIComponent(projectId)}&tab=${rows.some((m) => m.kind === "video") ? "video" : "image"}`} className="text-caption text-ink-dim underline-offset-2 hover:underline">
+          管理版本
+        </Link>
+        {!canSet && <span className="text-caption text-ink-mute">这个项目不在本机浏览器里，改指针做不了（回收站与预览不受影响）</span>}
+      </div>
+
+      <Modal open={!!internal} onClose={() => setInternal(null)} width={880} title={internal ? `${label} V${internal.version ?? "?"}` : "预览"}>
+        {internal?.kind === "video" ? <VideoPreview media={internal ?? undefined} /> : <ImagePreview media={internal ?? undefined} alt="版本预览" />}
+      </Modal>
+      <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
+    </div>
+  );
+}

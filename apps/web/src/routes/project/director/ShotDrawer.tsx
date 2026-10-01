@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, ChevronLeft, ChevronRight, Film, MapPin, MessageSquare, Scissors, Sparkles, Video, Wand2, X } from "lucide-react";
 import { Badge, Button, Input, MachChip, Panel, Progress, Select, StateGlyph, type StateKey, Toggle } from "../../../components/ui";
 import { SplitHandle, usePane } from "../../../components/SplitPane";
+import { VersionGroup } from "../../../components/VersionHistory";
 import { videoChainShots, videoRequest } from "../../../lib/generate";
 import type { GenTarget } from "../../../lib/generate";
 import { genKey } from "../../../lib/useGenerate";
@@ -408,6 +409,18 @@ export function ShotDrawer({
                   {hasStart && !frameMediaId(shot, "end") && " 没有结束帧时走单图生视频（i2v），有则走首尾帧（fl2v）。"}
                 </p>
               )}
+
+              {/* 成片的多版本：videoMediaIds 一直把所有版本都存着，界面上却只看得见「第 N 段」。
+                  这条轨道能翻旧版、能删进回收站；[0] 就是时间轴与导出实际取用的那一版。
+                  成片没有缩略图，封面一律用这一镜的首帧静帧。 */}
+              <VersionGroup
+                projectId={ctx.project.id}
+                role="video"
+                refId={shot.id}
+                aspect={ctx.aspect}
+                label={`${cardLabel(shot)} 成片`}
+                posterOf={() => mediaOf(ctx, frameMediaId(shot, "start"))}
+              />
             </div>
           </div>
         </Panel>

@@ -12,6 +12,7 @@ import { useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Archive, Images, Monitor, Plus, RefreshCw, Smartphone, Sparkles, Wand2 } from "lucide-react";
 import { Badge, Button, Empty, Select, Skeleton, Spinner, Tabs } from "../../components/ui";
+import { VersionGroup } from "../../components/VersionHistory";
 import { useApi } from "../../lib/apiClient";
 import { keys, useGpuState, useInstances, useMedia, useProject, useProjectMutations, useWorkflows } from "../../lib/hooks";
 import { characterRequest, sceneRequest, variationRequest, type GenTarget } from "../../lib/generate";
@@ -785,6 +786,10 @@ function PreviewBody({ media, title }: { media: Media; title: string }) {
         {media.width && media.height ? ` · ${media.width}×${media.height}` : ""}
         {media.bytes ? ` · ${(media.bytes / 1024 / 1024).toFixed(1)}MB` : ""}
       </div>
+
+      {/* 这一组的其他版本：重新生成过的图以前只是被盖在 refMediaIds 后面看不见，
+          现在能翻出来、能设当前、能删进回收站 */}
+      {media.projectId && <VersionGroup projectId={media.projectId} role={media.role} refId={media.refId} aspect="16/9" label={title} />}
     </div>
   );
 }

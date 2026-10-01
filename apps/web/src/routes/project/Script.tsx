@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { CircleCheck, TriangleAlert } from "lucide-react";
 import { Badge, Button, Modal, StateGlyph, Tabs } from "../../components/ui";
+import { ScriptVersionList } from "../../components/ScriptVersionList";
 import { SplitHandle, usePane } from "../../components/SplitPane";
-import { useLlmDefaults, useLlmRun, useLlms, useProject, useProjectMutations, useScriptVersionActions } from "../../lib/hooks";
+import { useLlmDefaults, useLlmRun, useLlms, useProject, useProjectMutations, useScriptVersionActions, useScriptVersions } from "../../lib/hooks";
 import { flushSaves, queueSave } from "../../lib/localStores";
 import type { AspectRatio, H3PromptMode, LlmShot, Project } from "../../lib/types";
 import { ConfigPanel } from "./script/ConfigPanel";
@@ -13,7 +14,7 @@ import { planReprompt, repromptShots, type RepromptPlan } from "./script/repromp
 import { ChatDock } from "./script/ChatDock";
 import { LLM_MAX_INPUT_CHARS, buildShots, errText, mergeScriptEntities, normalizeParsed, storyboardBrief } from "./script/merge";
 
-type TabKey = "create" | "manifest";
+type TabKey = "create" | "manifest" | "history";
 
 /** 本机模型没有百分比可报，进度只能说清「现在在干哪一步」，实测区间写在文案里 */
 const STEP_PARSE = "第 1/2 步：正在拆解剧本结构（标题 / 角色 / 场景 / 节拍），预计 1–3 分钟…";
@@ -29,6 +30,7 @@ export default function Script() {
   // 剧本的 V1/V2 存在服务端（script_versions），正文仍写 IndexedDB：
   // 版本历史要活到浏览器之外才谈得上回收站与到期真删
   const versions = useScriptVersionActions(id);
+  const { data: scriptVersions } = useScriptVersions(id);
   const [saveNote, setSaveNote] = useState<string | null>(null);
 
   const [tab, setTab] = useState<TabKey>("create");
@@ -348,6 +350,8 @@ export default function Script() {
     : null;
 
   const shotCount = project.data.shots.length;
+  // tab 上的数字只数活版本（回收站里的不算"可用"）
+  const scriptVersionCount = (scriptVersions ?? []).filter((v) => !v.deletedAt).length;
   const orphan = !busy && project.data.isParsingScript;
   const backend = llms?.find((b) => b.id === (project.config.shotModelBackendId ?? project.config.llmBackendId));
 
@@ -361,6 +365,7 @@ export default function Script() {
           tabs={[
             { key: "create", label: "剧本创作" },
             { key: "manifest", label: "拍摄清单", badge: <span className="label mono">{shotCount}</span> },
+            { key: "history", label: "版本历史", badge: <span className="label mono">{scriptVersionCount}</span> },
           ]}
         />
         <div className="ml-auto flex items-center gap-2 py-2">
@@ -477,8 +482,18 @@ export default function Script() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : tab === "manifest" ? (
         <Manifest project={project} onPatchData={(patch) => void patchData(patch)} onBackToCreate={() => switchTab("create")} />
+      ) : (
+        // 版本历史：AI 续写、改写、助手写回、拆解各留一版；正文手改了但还没存版，这里也看得出来
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+          {id && <ScriptVersionList projectId={id} />}
+          {project.data.scriptVersionUuid === null && project.data.rawScript.trim() && (
+            <p className="text-caption leading-snug text-ink-mute">
+              编辑器里的正文还没有对应的版本记录 —— 下一次生成会自动补成 V1，不用你手动存。
+            </p>
+          )}
+        </div>
       )}
 
       {tab === "create" && (
@@ -490,7 +505,11 @@ export default function Script() {
           blocked={busy ? `分镜脚本正在生成（${busy}），这台模型是单槽串行的，等它跑完再对话。` : null}
           onPersist={(chats) => void patchData({ scriptChats: chats })}
           onWriteBack={(text) => {
+            const before = previousText();
             onDraftChange(text);
+            // 助手写回是整篇替换，和 AI 续写一样必须留版：不存就等于上一版当场消失，
+            // 而这条路径本来就是「模型只回被改的那一段」最容易丢字的地方
+            void saveVersion({ text, source: "ai-write", previous: before });
             setDone(`已由对话助手写回，共 ${text.length} 字。拍摄清单里的镜头没动 —— 要按新稿子重出镜头表，点「生成分镜脚本」。`);
           }}
         />

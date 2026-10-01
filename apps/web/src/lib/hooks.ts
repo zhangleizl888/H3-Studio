@@ -3,6 +3,7 @@ import type { Api, ScriptTrashResult } from "./api";
 import type { LlmRunOpts } from "./api";
 import type { LlmPurpose, ScriptVersionRow, ScriptVersionSource, VersionBucket } from "./types";
 import { flushSaves, patchProject } from "./localStores";
+import { sanitizeDanglingRefs } from "./versions";
 import { useApi } from "./apiClient";
 
 export const keys = {
@@ -270,8 +271,23 @@ export function useMediaVersions(scope: { projectId?: string | null; bucket?: Ve
   });
 }
 
-export function useScriptVersions(projectId: string | null | undefined, includeDeleted = false) {
+/**
+ * 某一个生成对象的版本组（按服务端 (role, ref_id) 取）。
+ *
+ * 和 useMediaVersions 的分工：那个是「一桶全拉、前端分组」给全局页用的（那里几十张卡，
+ * 逐个查就是 N+1）；这个是内嵌面板用的 —— 抽屉/预览同一时刻只开一个，按分组精确查更省。
+ */
+export function useVersionGroup(projectId: string | null | undefined, role?: string | null, refId?: string | null) {
   const api = useApi();
+  return useQuery({
+    queryKey: keys.mediaVersionsOf(projectId ?? null, `group:${role ?? ""}:${refId ?? ""}`),
+    queryFn: () => api.versions.media({ projectKey: projectId ?? undefined, role: role ?? undefined, refId: refId ?? undefined, includeDeleted: true }),
+    enabled: !!projectId && !!role,
+    staleTime: 15_000,
+  });
+}
+
+export function useScriptVersions(projectId: string | null | undefined, includeDeleted = false) {  const api = useApi();
   return useQuery({
     queryKey: keys.scriptVersionsOf(projectId ?? null),
     queryFn: () => api.versions.script(projectId ?? "", { includeDeleted }),
@@ -367,6 +383,24 @@ export function useVersionMutations(defaultProjectId?: string | null) {
         }),
     }),
   };
+}
+
+/**
+ * 把服务端还活着的产物重新登记进本地索引，然后摘掉指向"哪都没有"的实体指针。
+ *
+ * 顺序绝不能反：先 adopt 服务端活行，再清指针 —— 反过来就会把「索引被清过但服务端还在」
+ * 的正常产物当成坏的删掉。换浏览器 / 清过缓存 / 在别的机器上出过片之后靠它对齐。
+ * 做成显式按钮而不是自动跑，是因为它在改用户的项目实体，得能解释。
+ */
+export async function resyncMediaIndex(api: Api, projectId: string) {
+  const live = await api.media.server({ projectKey: projectId });
+  for (const m of live) await api.media.adopt(m);
+  const indexed = await api.media.project(projectId);
+  const valid = new Set([...live, ...indexed].map((m) => m.id));
+  const dangling: string[] = [];
+  await flushSaves();
+  await patchProject(projectId, {}, (p) => dangling.push(...sanitizeDanglingRefs(p, valid)));
+  return { adopted: live.length, dangling: dangling.length };
 }
 
 /**

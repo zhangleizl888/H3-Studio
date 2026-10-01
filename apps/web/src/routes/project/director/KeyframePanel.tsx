@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Copy, Sparkles, Upload, ZoomIn } from "lucide-react";
 import { Badge, Button, Progress, StateGlyph, type StateKey } from "../../../components/ui";
+import { VersionGroup } from "../../../components/VersionHistory";
 import { keyframeRequest } from "../../../lib/generate";
 import type { GenTarget } from "../../../lib/generate";
 import { genKey } from "../../../lib/useGenerate";
@@ -107,6 +108,15 @@ export function KeyframePanel({
       </div>
 
       <MediaImage media={media} seedText={`${shot.id}-${type}`} aspect={ctx.aspect} alt={`${cardLabel(shot)} ${label}`} />
+
+      {/* 这一帧的旧版本：重新生成以前只是把上一张顶掉，现在能翻回来、能删进回收站 */}
+      <VersionGroup
+        projectId={ctx.project.id}
+        role={`keyframe_${type}`}
+        refId={`${shot.id}:${type}`}
+        aspect={ctx.aspect}
+        label={`${cardLabel(shot)} ${label}`}
+      />
 
       <CommitText
         ariaLabel={`${label}提示词`}
