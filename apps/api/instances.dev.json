@@ -1,0 +1,11 @@
+[
+  {
+    "id": "inst_local",
+    "name": "本机 4090",
+    "protocol": "comfy_native",
+    "placement": "local",
+    "base_url": "http://127.0.0.1:8188",
+    "local_output_root": "F:/H3/comfyui/ComfyUI/output",
+    "is_default": true
+  }
+]

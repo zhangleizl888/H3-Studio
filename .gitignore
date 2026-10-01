@@ -1,0 +1,41 @@
+# 依赖与虚拟环境
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 构建产物
+dist/
+build/
+*.tsbuildinfo
+
+# 本地数据与生成物（含 pgdata、媒体产物、导出、下载、临时）
+data/
+.downloads/
+.scratch/
+.tooling-pg/
+
+# 外部安装与参考仓库（体积大 / 第三方，不入库）
+comfyui/
+reference/
+
+# 密钥与环境（绝不入库）
+.env
+.env.*
+!.env.example
+*.key
+.secret*
+apps/api/.secret-jwt_key.txt
+
+# 日志
+*.log
+*.out
+
+# 编辑器 / 操作系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

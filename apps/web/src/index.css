@@ -1,0 +1,312 @@
+@import "tailwindcss";
+
+/* ============================================================
+   H3 Studio — 设计 token（形态语言对齐 manga-studio）
+   两条线要分清，混了就会出事：
+     · 装饰色相（--color-chrome*）：只给界面本身用 —— 焦点、渐变按钮、
+       选中态、进度条、光斑背景。它不承载任何数据含义。
+     · 数据色相（--color-mach-*）：只回答一个问题「这块内容是哪个实例产出的」。
+       定妆图/关键帧/视频/状态条用它，且永远和图形同现（色盲友好）。
+   形态：深色玻璃层 + 圆角分层（控件 10 / 贴图 12 / 面板 16 / 弹窗 28）+ mono
+   大写微标签 + 48px 网格覆盖层。本机部署、可能离线 → 仍然不引 webfont，走系统栈。
+   任何「表面」都必须用语义 token（--color-inset / -track / -row-hover / -hairline…），
+   不要写死 hex —— 写死的深色面在浅色主题下会把文字吃掉。
+   ============================================================ */
+
+@theme {
+  /* —— 底：偏蓝黑的玻璃层，不是纯黑 —— */
+  --color-void: #04070b; /* 画面留边（letterbox）与背景最底层 */
+  --color-slate: #0a0f18; /* 应用外壳 */
+  --color-panel: #121a26; /* 面板 */
+  --color-raised: #182333; /* 浮起的一层 */
+  --color-rule: #26344a; /* 细线 */
+  --color-rule-soft: #1b2536;
+  --color-ink: #e8eff7; /* 主文本 */
+  --color-ink-hi: #ffffff; /* 反相主按钮 hover：浅色主题下会翻成「更深」而不是更白 */
+  --color-ink-dim: #a7b8cb;
+  --color-ink-mute: #7b8ea6; /* 5.2:1 on panel —— 三级文字也要读得清 */
+
+  /* —— 装饰色相：界面自己的颜色 —— */
+  --color-chrome: #6ee7f7; /* cyan-300，选中/焦点/进度 */
+  --color-chrome-2: #38bdf8; /* sky-400，渐变终点 */
+  --color-chrome-ink: #04121a; /* 渐变按钮上的字色（近黑，不用白字）*/
+
+  /* —— 表面语义：回答「这是哪一层」，而不是记住一个 hex —— */
+  --color-inset: #0f1416; /* 代码块、命令串：凹进去的一层 */
+  --color-track: #202a2f; /* 进度条底槽 */
+  --color-row-hover: #1e272b; /* 表格行 hover / 选中 */
+  --color-skeleton: #212b30; /* 加载占位 */
+  --color-hairline: rgb(255 255 255 / 0.1); /* 界面细线与分隔条 */
+  --color-sheen: rgb(255 255 255 / 0.05); /* 一层提亮：底色、分段控件 */
+  --color-sheen-hi: rgb(255 255 255 / 0.11); /* 两层：hover / 选中，必须比 sheen 明显更亮 */
+  --color-scrim: #04070b; /* 压在影像上的遮罩：两主题都保持深底，不随主题翻转 */
+
+  /* —— 机器身份色（数据色相，整套 UI 唯一的语义色来源）—— */
+  --color-mach-local: #4ade80; /* 本机 ComfyUI：翡翠，免费且完全可控 */
+  --color-mach-self: #a78bfa; /* 自建云端：紫罗兰 */
+  --color-mach-rh: #fbbf24; /* RunningHub：琥珀，同时也是「在花钱」的颜色 */
+
+  /* —— 状态：亮度 + 图形，不新增色相 —— */
+  --color-state-idle: #45566b;
+  --color-state-queued: #7d93ab;
+  --color-state-running: #b7ecf6; /* 高亮 + 条纹动画；条纹用所在机器的色相 */
+  --color-state-ok: #86efac;
+  --color-state-fail: #fb7185;
+  --color-state-canceled: #8a7a68;
+
+  /* —— 排版 —— */
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: "Cascadia Mono", ui-monospace, "Consolas", "JetBrains Mono",
+    "Sarasa Mono SC", "Noto Sans Mono CJK SC", monospace;
+
+  /* 字阶：9 档，全部整数。用 text-micro…text-stat，不要再写 text-[11.5px]。
+     半像素字号会被浏览器按不同方式取整，同一页里两套控件就会错位；
+     小于 10px 的字号在任何 DPI 下都读不动，所以最低档就是 10。
+     只定义字号、不配对行高：行高继续由 body 的 1.5 和显式 leading-* 决定。 */
+  --text-micro: 10px; /* 时间轴刻度、影像上的角标 —— 只放极短文本 */
+  --text-caption: 11px; /* 表头、键名、次级说明 */
+  --text-note: 12px; /* 说明性正文、控件内文字 */
+  --text-body: 13px; /* 基准正文，等于 body 的 font-size */
+  --text-subtitle: 14px; /* 卡片标题 */
+  --text-title: 16px; /* 页面标题 */
+  --text-heading: 18px; /* 一级页头 */
+  --text-display: 24px; /* 登录与项目库的标题 */
+  --text-stat: 30px; /*  mono 大数字 */
+
+  /* 圆角按层级区分：控件 < 贴图层 < 面板 < 弹窗；影像条保持直角（像胶片）*/
+  --radius-ctl: 10px;
+  --radius-tile: 12px;
+  --radius-panel: 16px;
+  --radius-sheet: 28px;
+  --radius-strip: 0px;
+  --radius-hairline: 1px; /* 1px 高的进度条：圆角再大就看不见了 */
+}
+
+/* ============ 基线 ============ */
+* {
+  border-color: var(--color-rule-soft);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-void);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "cv05" 1;
+}
+
+/* 三层光斑 + 三色斜向底：整站的「空气」，内容永远盖在它上面 */
+.app-bg {
+  background:
+    radial-gradient(1200px 620px at 8% -10%, color-mix(in srgb, var(--color-chrome) 15%, transparent), transparent 60%),
+    radial-gradient(1000px 600px at 100% 100%, color-mix(in srgb, #a855f7 15%, transparent), transparent 62%),
+    radial-gradient(760px 520px at 82% 8%, color-mix(in srgb, #34d399 10%, transparent), transparent 60%),
+    linear-gradient(135deg, #07111f 0%, #120b1f 48%, #07130f 100%);
+}
+
+/* 48px 网格细线覆盖层：低到几乎看不见，但缺了它这层玻璃就不成立 */
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1; /* 它是底纹，不是遮罩：永远在内容之下 */
+  opacity: 0.25;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--color-chrome) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-chrome) 8%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* 玻璃面板：所有浮起的东西都用它，边框靠白色透明度而不是实色 */
+.glass {
+  background: rgb(255 255 255 / 0.045);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  backdrop-filter: blur(14px);
+}
+.glass-strong {
+  background: rgb(255 255 255 / 0.07);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  backdrop-filter: blur(20px);
+}
+
+#root {
+  height: 100%;
+}
+
+/* 数字与标识一律等宽对齐，长会话里靠对齐而非留白来读 */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 微标签：mono + 大写 + 拉开字距。manga-studio 用它做分区，读起来像仪表读数。
+   11px 而不是 10px —— 这些标签会写中文（「当前项目」），中文在 10px 下发糊；
+   字距也从 .18em 收到 .14em，同一个值压在拉丁字母上刚好，压在中文上就散架。 */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+
+/* 引用条：项目 logline / 提示词预览用这一条竖线，而不是套一层卡片 */
+.quote-bar {
+  border-left: 1px solid color-mix(in srgb, var(--color-chrome) 30%, transparent);
+  padding-left: 8px;
+}
+
+/* 焦点环：整套 UI 唯一的键盘焦点指示，控件里不许再用 focus:outline-none 抹掉它。
+   2px 描边 + 2px 外偏移。outline 会自己跟随元素的 border-radius，
+   所以这里绝对不要设 border-radius —— 那会在聚焦瞬间改掉控件本身的形状。 */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-chrome) 85%, transparent);
+  outline-offset: 2px;
+}
+
+/* 细滚动条：工具界面，不抢内容 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b3a4f;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4d66;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-chrome) 30%, transparent);
+}
+
+/* ============ 状态：亮度 + 图形 ============ */
+/* 「在跑」是唯一的非交互动画，且尊重 reduced-motion */
+.stripe {
+  position: relative;
+  overflow: hidden;
+}
+.stripe::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    115deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--stripe) 55%, transparent) 6px 12px
+  );
+  opacity: 0.5;
+  animation: stripe-drift 1.1s linear infinite;
+}
+@keyframes stripe-drift {
+  to {
+    background-position: 24px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .stripe::after {
+    opacity: 0.9; /* 静止也能认出是「在跑」：靠条纹图形本身 */
+  }
+}
+
+/* 机器身份的小色标：始终与图形同现，不单靠颜色（色盲友好）*/
+.machchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-caption);
+  color: var(--color-ink-dim);
+}
+.machchip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--mach);
+  flex: none;
+}
+.machchip[data-mach="local"] {
+  --mach: var(--color-mach-local);
+}
+.machchip[data-mach="cloud_self"] {
+  --mach: var(--color-mach-self);
+}
+.machchip[data-mach="cloud_runninghub"] {
+  --mach: var(--color-mach-rh);
+}
+
+/* 表头/键名：小字灰色，不用全大写（分区标签请用 .label-mono）*/
+.label {
+  font-size: var(--text-caption);
+  color: var(--color-ink-mute);
+}
+
+/* ============ 浅色主题 ============ */
+/* 这里必须把「表面」也一起翻过来。之前侧栏写死 bg-[#0a0f18]/70、
+   代码块写死 #0f1416，文字却跟着主题变深 —— 合成出来只有 1.07:1，
+   等于浅色主题下的界面文字是看不见的。 */
+[data-theme="light"] {
+  --color-void: #eef2f7;
+  --color-slate: #f6f8fb;
+  --color-panel: #ffffff;
+  --color-raised: #f2f5f9;
+  --color-rule: #ccd8e6;
+  --color-rule-soft: #e3eaf2;
+  --color-ink: #10202f;
+  --color-ink-hi: #00101f; /* 反相按钮 hover 要往更深走，否则白底白字 */
+  --color-ink-dim: #46596e;
+  --color-ink-mute: #5f7085; /* 5.1:1 —— 浅色下三级文字同样要过 AA 4.5:1 */
+  --color-inset: #eef2f7;
+  --color-track: #dfe6ee;
+  --color-row-hover: #eef3f8;
+  --color-skeleton: #e3eaf2;
+  --color-hairline: rgb(16 32 47 / 0.14);
+  --color-sheen: rgb(16 32 47 / 0.06);
+  --color-sheen-hi: rgb(16 32 47 / 0.11);
+  --color-chrome: #0891b2;
+  --color-chrome-2: #0284c7;
+  --color-chrome-ink: #f6fbfd;
+  --color-mach-local: #15803d;
+  --color-mach-self: #6d28d9;
+  --color-mach-rh: #b45309;
+  --color-state-idle: #b7c2cf;
+  --color-state-queued: #8798aa;
+  --color-state-running: #0e7490;
+  --color-state-ok: #15803d;
+  --color-state-fail: #be123c;
+  --color-state-canceled: #7c6a55;
+}
+[data-theme="light"] .app-bg {
+  background:
+    radial-gradient(1100px 560px at 6% -10%, color-mix(in srgb, var(--color-chrome) 12%, transparent), transparent 60%),
+    radial-gradient(900px 520px at 100% 100%, color-mix(in srgb, #a855f7 8%, transparent), transparent 62%),
+    linear-gradient(135deg, #f7fafc 0%, #eef3f9 50%, #f6f8fb 100%);
+}
+[data-theme="light"] .glass,
+[data-theme="light"] .glass-strong {
+  background: rgb(255 255 255 / 0.72);
+  border-color: var(--color-rule-soft);
+  backdrop-filter: blur(10px);
+}

@@ -1,0 +1,605 @@
+/**
+ * 领域类型 —— 与 PLAN.md §4 数据模型一一对应。
+ * 后端尚未存在，先以这份契约驱动前端与 mock；实现后端时以此为唯一真源。
+ */
+
+/* ───────── 生成实例 ───────── */
+
+/** 分派依据：协议，而不是服务商 */
+export type GenProtocol = "comfy_native" | "rh_task";
+
+/** 仅用于 UI 分组与筛选，不参与分派逻辑 */
+export type Placement = "local" | "cloud_self" | "cloud_runninghub";
+
+export type RhSite = "cn" | "global";
+export type RhInstanceType = "default" | "plus" | "ultra"; // 24G / 48G / 84G
+
+export interface GenInstance {
+  id: string;
+  name: string;
+  protocol: GenProtocol;
+  placement: Placement;
+  /** 后端返回给前端时，RunningHub 的 apiKey 已从 URL 中脱敏 */
+  baseUrl: string;
+  wsUrl?: string | null;
+  apiKeySet?: boolean;
+  site?: RhSite;
+  instanceType?: RhInstanceType;
+  retainSeconds?: number | null;
+  isDefault: boolean;
+  /** 仅本地：ComfyUI output 目录，可直接读盘省一次下载 */
+  localOutputRoot?: string | null;
+  tunnelName?: string | null;
+  capabilities?: InstanceCaps;
+  quota?: RhQuota;
+  cost?: CostSummary;
+  lastProbeAt?: string | null;
+  lastProbeOk?: boolean | null;
+  lastError?: string | null;
+  /** 该实例当前是否有任务在跑（前端用于串行显示） */
+  busy?: boolean;
+}
+
+export interface InstanceCaps {
+  comfyVersion?: string;
+  nodeCount?: number;
+  vramTotalGb?: number;
+  vramFreeGb?: number;
+  gpu?: string;
+  h3?: {
+    MiniMaxH3ImageToVideo?: boolean;
+    MiniMaxH3SigmaShift?: boolean;
+    MiniMaxH3ReferenceToVideo?: boolean;
+    MiniMaxH3AddGuide?: boolean;
+  };
+  qwenImage?: boolean;
+  missingModels?: string[];
+}
+
+export interface RhQuota {
+  apiKeyType?: "consumer" | "enterprise_shared" | "enterprise_exclusive";
+  concurrentLimit?: number;
+  runningCount?: number;
+  queuedCount?: number;
+  remainCoins?: number;
+  remainMoney?: number;
+  currency?: string;
+}
+
+export interface CostSummary {
+  coins?: number;
+  money?: number;
+  gpuSeconds?: number;
+  tasks?: number;
+}
+
+/* ───────── 文本模型后端 ───────── */
+
+export type LlmScope = "local" | "cloud";
+export type LlmKind = "ollama" | "openai_compat";
+export type StreamStyle = "ndjson" | "sse";
+
+/** 自动发现时判别出的后端种类 */
+export type DetectedBackend = "ollama" | "llamacpp" | "lmstudio" | "vllm" | "unknown";
+
+export interface LlmBackend {
+  id: string;
+  name: string;
+  scope: LlmScope;
+  kind: LlmKind;
+  baseUrl: string;
+  apiKeySet?: boolean;
+  chatPath: string;
+  streamStyle: StreamStyle;
+  capabilities: LlmCaps;
+  isDefault: boolean;
+  lastProbeAt?: string | null;
+  lastProbeOk?: boolean | null;
+  lastError?: string | null;
+}
+
+export interface LlmCaps {
+  models: string[];
+  /** 探测到的实际上下文上限 */
+  ctxSize?: number | null;
+  hasJsonSchema: boolean;
+  hasVision: boolean;
+  hasTools: boolean;
+  /** Ollama 可每请求传 num_ctx；llama.cpp 的 -c 是启动参数，改不了 */
+  ctxIsPerRequest: boolean;
+  /** 模型能否由本后端拉取（Ollama 有 /api/pull，llama.cpp 没有） */
+  supportsPull: boolean;
+  enterpriseSharedOnly?: boolean;
+}
+
+export interface LocalScanEntry {
+  port: number;
+  detectedAs: DetectedBackend;
+  ok: boolean;
+  baseUrl?: string;
+  name?: string;
+  models?: number;
+  ctxSize?: number | null;
+  detail?: string;
+}
+
+export interface LocalScanResult {
+  found: LocalScanEntry[];
+  /** 全空时给出各家启动命令，而不是只报「连接失败」 */
+  hints: { backend: DetectedBackend; label: string; command: string; note?: string }[];
+}
+
+/* ───────── 工作流 ───────── */
+
+export type WorkflowFamily = "image" | "video" | "audio" | "upscale" | "custom";
+
+export interface WorkflowSlot {
+  /** 地址语法：nodeId.inputName / nodeId.index / parent/child.inputName / *:inputName */
+  address: string;
+  path?: string;
+  name: string;
+  type: "string" | "int" | "float" | "bool" | "combo" | "image" | "video" | "audio";
+  default?: unknown;
+  widget: boolean;
+  required: boolean;
+  group: "输入" | "采样" | "输出";
+  min?: number | null;
+  max?: number | null;
+  step?: number | null;
+  options?: string[] | null;
+  /** RunningHub 执行时投影成 nodeInfoList 的 fieldName */
+  rhFieldName?: string;
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  family: WorkflowFamily;
+  sourceFormat: "api" | "ui";
+  graph: Record<string, GraphNode>;
+  slots: WorkflowSlot[];
+  nodeSummary?: Record<string, string[]>;
+  requirements?: {
+    models?: { folder: string; filename: string }[];
+    customNodes?: string[];
+    pip?: string[];
+    /** 只能在 RunningHub 上跑的专有节点 */
+    runninghubOnly?: string[];
+  };
+  isBuiltin: boolean;
+  objectInfoHash?: string | null;
+  updatedAt: string;
+}
+
+export interface GraphNode {
+  class_type: string;
+  inputs: Record<string, unknown>;
+  _meta?: { title?: string };
+}
+
+/** RunningHub 的入参覆盖形状 */
+export interface NodeOverride {
+  nodeId: string;
+  fieldName: string;
+  fieldValue: unknown;
+}
+
+/* ───────── 任务 ───────── */
+
+export type JobState = "queued" | "dispatching" | "running" | "succeeded" | "failed" | "canceled";
+export type JobKind =
+  | "llm_chat"
+  | "image"
+  | "video"
+  | "video_chain"
+  | "upscale"
+  | "detect_shots"
+  | "assemble"
+  | "workflow_test";
+
+export interface JobProgress {
+  value?: number;
+  max?: number;
+  node?: string | null;
+  nodeTitle?: string | null;
+  stage?: string | null;
+  etaSec?: number | null;
+  /** RunningHub Task API 不给百分比 */
+  unavailable?: boolean;
+}
+
+export interface Job {
+  id: string;
+  projectId?: string | null;
+  kind: JobKind;
+  state: JobState;
+  priority: number;
+  title: string;
+  instanceId?: string | null;
+  llmBackendId?: string | null;
+  workflowId?: string | null;
+  promptId?: string | null;
+  progress: JobProgress;
+  queuePos?: number | null;
+  attempts: number;
+  error?: JobError | null;
+  outputMediaIds: string[];
+  log: { ts: string; level: string; msg: string }[];
+  cost?: { coins?: number; money?: number; seconds?: number };
+  startedAt?: string | null;
+  finishedAt?: string | null;
+}
+
+export interface JobError {
+  type: string;
+  message: string;
+  nodeId?: string | null;
+  nodeType?: string | null;
+  /** RunningHub 的 failedReason 会带原始 ComfyUI traceback */
+  tracebackTail?: string | null;
+  /** 面向人的处置建议，由后端映射错误码生成 */
+  hint?: string | null;
+}
+
+/* ───────── 媒体 ───────── */
+
+export type MediaKind = "image" | "video" | "audio" | "archive" | "ref_image" | "ref_video" | "ref_audio";
+export type MediaRole =
+  | "character"
+  | "variation"
+  | "scene"
+  | "keyframe_start"
+  | "keyframe_end"
+  | "video"
+  | "thumbnail"
+  | "export"
+  | "final";
+
+export interface Media {
+  id: string;
+  projectId?: string | null;
+  kind: MediaKind;
+  role: MediaRole;
+  refId?: string | null;
+  /** 相对 data/media/ 的路径。后端绝不存外链 */
+  path: string;
+  thumbPath?: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  durationMs?: number | null;
+  bytes?: number | null;
+  mime?: string;
+  instanceId?: string | null;
+  promptId?: string | null;
+  seed?: number | null;
+  createdAt: string;
+}
+
+/* ───────── 项目 ───────── */
+
+export type Stage = "script" | "manifest" | "assets" | "director" | "export" | "prompts";
+
+/** 横竖屏。影响出图尺寸、出片分辨率与模型可选档，不改布局 */
+export type AspectRatio = "16:9" | "9:16" | "1:1";
+
+export interface Project {
+  id: string;
+  name: string;
+  synopsis?: string;
+  stage: Stage;
+  config: ProjectConfig;
+  data: ProjectData;
+  ownerId?: string | null;
+  updatedAt: string;
+  createdAt: string;
+  archived?: boolean;
+}
+
+export interface ProjectConfig {
+  aspectRatio: AspectRatio;
+  visualStyle: string;
+  /** 目标时长（秒）：30/60/120/300/900/自定义。分镜拆解按它分配每镜时长 */
+  targetDurationSec: number;
+  /** 输出语言：中文 / English / 日本語 / Français / Español */
+  outputLanguage: string;
+  /** 默认出图/出视频实例 */
+  imageInstanceId?: string | null;
+  videoInstanceId?: string | null;
+  /** 默认文本后端（剧本拆解 / 分镜 / 提示词改写共用） */
+  llmBackendId?: string | null;
+  /** 分镜生成用哪个后端的哪个模型；留空跟 llmBackendId */
+  shotModelBackendId?: string | null;
+  shotModel?: string | null;
+  /** 生成模板 key（见后端 /api/workflows 的 builtin:*） */
+  imageTemplate: string;
+  videoTemplate: string;
+  seedPolicy: "locked" | "random" | "increment";
+  resolutionMode: "preview" | "full";
+  h3WorkflowKey: string;
+  /** H3 提示词模式：决定 buildH3Prompt 出哪种结构、AI 重写让模型按哪种规范写 */
+  h3PromptMode: H3PromptMode;
+  /** 为什么选这个模式。参考项目要求模式决策留痕，禁止静默走默认 */
+  h3PromptReason?: string;
+  continuity: boolean;
+  continuityOverlapFrames: number;
+  /** AI 增强提示词：本地模板拼完再让模型扩写一次 */
+  enhancePrompts: boolean;
+}
+
+export interface ProjectData {
+  rawScript: string;
+  script?: ScriptData;
+  characters: Character[];
+  scenes: Scene[];
+  shots: Shot[];
+  renderLogs: RenderLog[];
+  /** 任务进行中的步骤描述：切页/刷新后能恢复「正在拆解第 2/3 场」这种提示 */
+  taskStep?: string;
+  taskError?: string;
+  isParsingScript?: boolean;
+}
+
+export interface ScriptData {
+  logline?: string;
+  title?: string;
+  genre?: string[];
+  /** traits 由拆解回填，是拼一致性提示词的结构化外形 */
+  characters: { name: string; desc: string; traits?: Character["traits"] }[];
+  scenes: { name: string; desc: string }[];
+  beats: { text: string; sceneName?: string }[];
+  /** 按叙事顺序的故事段落，拍摄清单的「故事梗概」用它 */
+  storyParagraphs?: { id: number; text: string; sceneRefId?: string }[];
+}
+
+/** 四类生成对象的统一状态。generating 却没有产物 = failed，见 localStores.reconcileShots */
+export type AssetState = "pending" | "generating" | "completed" | "failed";
+
+export interface Character {
+  id: string;
+  name: string;
+  desc: string;
+  gender?: string;
+  age?: string;
+  /** 性格与说话方式，写进演员表但不进画面提示词 */
+  personality?: string;
+  /** 结构化外形，用于拼一致性提示词 */
+  traits?: { age?: string; build?: string; hair?: string; costume?: string; palette?: string; signature?: string };
+  refMediaIds: string[];
+  variations: Variation[];
+  seed: number;
+  locked: boolean;
+  promptNote?: string;
+  /** 用户手改过的画面/负向提示词；为空则按 traits 现拼 */
+  visualPrompt?: string;
+  negativePrompt?: string;
+  /** 跨镜头必须一致的特征（脸、发型、标志物），拼提示词时单独成段 */
+  coreFeatures?: string;
+  status?: AssetState;
+}
+
+export interface Variation {
+  id: string;
+  name: string;
+  desc: string;
+  refMediaIds: string[];
+  visualPrompt?: string;
+  negativePrompt?: string;
+  status?: AssetState;
+}
+
+export interface Scene {
+  id: string;
+  name: string;
+  desc: string;
+  /** 地点 / 时段 / 氛围三要素，对应「内廷-未央宫偏殿-日」 */
+  location?: string;
+  time?: string;
+  atmosphere?: string;
+  refMediaIds: string[];
+  visualPrompt?: string;
+  negativePrompt?: string;
+  status?: AssetState;
+}
+
+export type ShotState = "idle" | "queued" | "generating" | "completed" | "failed";
+
+/** 关键帧：一镜的起始/结束画面，各自带提示词与产物 */export interface Keyframe {
+  id: string;
+  type: "start" | "end";
+  visualPrompt: string;
+  negativePrompt?: string;
+  mediaId?: string | null;
+  status: AssetState;
+  jobId?: string | null;
+}
+
+export interface Shot {
+  id: string;
+  index: number;
+  sceneId: string | null;
+  characterIds: string[];
+  /** 选用的服装变体 */
+  variationByChar?: Record<string, string>;
+  action: string;
+  dialogue?: string;
+  cameraMovement: string;
+  shotSize: string;
+  startFrameMediaId: string | null;
+  endFrameMediaId: string | null;
+  /** 首尾帧的结构化版本；startFrameMediaId/endFrameMediaId 是它们的只读镜像 */
+  keyframes?: Keyframe[];
+  videoMediaIds: string[];
+  /** 视频段的提示词与时长（manga-studio 的 VideoInterval） */
+  videoPrompt?: string;
+  durationSec: number;
+  /** H3 合法帧数 17k+5，由前端算好并显示 */
+  frameCount: number;
+  seed: number;
+  locked: boolean;
+  instanceId: string | null;
+  workflowKey: string;
+  turbo: string | null;
+  h3Prompt: H3Prompt;
+  state: ShotState;
+  jobId?: string | null;
+  /** 续拍：本段用上一段尾帧作引导 */
+  continuesPrevious: boolean;
+  /** AI 拆分镜头产生的子镜：'shot-1-2'，父镜 id 是 'shot-1' */
+  parentShotId?: string | null;
+}
+
+/**
+ * H3 提示词模式。与后端 apps/api/app/director.py 的 MODES 同源，改一处必须改两处。
+ *  - three_field   三段式（本机已实测出片，默认）
+ *  - six_section   官方六段式，英文
+ *  - wenwu         中文导演分镜块（逐镜定时）
+ *  - hybrid        六段外壳 + 导演级内容 + constraints 负向块
+ */
+export type H3PromptMode = "three_field" | "six_section" | "wenwu" | "hybrid";
+
+/**
+ * 一条视频段的提示词。四种模式共用同一个对象：
+ *  - integrated / soundscape / music 四种模式都出（integrated 只写一句主旨，供列表与兜底显示）；
+ *  - 深度内容放各自字段：六段用 subjectDefinitions…detailedDescription，wenwu 用 sceneDescription + shotBlocks。
+ * mode 缺省按三段式读——IDB 里的旧项目根本没有这个字段。
+ */
+export interface H3Prompt {
+  mode?: H3PromptMode;
+  integrated: string;
+  soundscape: string;
+  music: string;
+  subjectDefinitions?: string;
+  summary?: string;
+  retentionAnalysis?: string;
+  detailedDescription?: string;
+  /** hybrid 结尾的风格与负向约束块 */
+  constraints?: string;
+  /** wenwu：开篇的时长/画幅/类型/生命核/素材职责/最终发展线 */
+  sceneDescription?: string;
+  /** wenwu：逐镜定时块原文，每条形如「镜头1（0-3s）：…」 */
+  shotBlocks?: string[];
+}
+
+/** 资产库：跨项目复用的角色/场景（含参考图与全部提示词） */
+export interface AssetLibraryItem {
+  id: string;
+  type: "character" | "scene";
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  character?: Character;
+  scene?: Scene;
+  /** 来源项目，用于「选择项目使用」的二跳 */
+  originProjectId?: string;
+  originProjectName?: string;
+}
+
+export interface RenderLog {
+  ts: string;
+  shotId: string;
+  kind: JobKind;
+  status: JobState;
+  instanceId: string;
+  durationMs?: number;
+  jobId: string;
+  error?: string;
+  /** 日志弹窗要能回答「这是谁的图、用了哪个模型、多长的提示词」 */
+  resourceType?: "character" | "character-variation" | "scene" | "keyframe" | "video" | "script-parsing" | "export";
+  resourceId?: string;
+  resourceName?: string;
+  model?: string;
+  prompt?: string;
+  projectId?: string;
+}
+
+/* ───────── 风格 / 用户 ───────── */
+
+export interface VisualStyle {
+  key: string;
+  name: string;
+  promptZh: string;
+  promptEn?: string;
+}
+
+export type Role = "admin" | "editor" | "viewer";
+
+export interface User {
+  id: string;
+  username: string;
+  displayName: string;
+  role: Role;
+  isActive: boolean;
+  lastLoginAt?: string | null;
+  quota?: { concurrentJobs: number; dailyMoneyLimit?: number | null };
+  usage?: { jobsToday: number; moneyToday?: number };
+}
+
+/* ───────── 探活报告 ───────── */
+
+export interface ProbeReport {
+  ok: boolean;
+  /** 按协议返回不同形状，前端分支渲染 */
+  native?: {
+    comfyVersion?: string;
+    nodeCount?: number;
+    gpu?: string;
+    vramTotalGb?: number;
+    vramFreeGb?: number;
+    caps?: InstanceCaps;
+    missingModels?: string[];
+  };
+  task?: {
+    queue?: RhQuota;
+    account?: RhQuota;
+    reachable?: boolean;
+  };
+  error?: string;
+  /** 给用户的下一步动作 */
+  hints?: string[];
+}
+
+export interface ImportReport {
+  valid: boolean;
+  sourceFormat: "api" | "ui";
+  errors: { node?: string; classType?: string; message: string }[];
+  warnings: string[];
+  unknownNodes: string[];
+  runninghubOnlyNodes: string[];
+  missingModels: { folder: string; filename: string }[];
+  missingCustomNodes: string[];
+  slotCount: number;
+  estimated?: { seconds: number; frames: number; width: number; height: number; steps: number };
+  installPlan?: string[];
+}
+
+/* ───────── 文本模型用途（同步返回，结果直接写进 IndexedDB 的项目） ───────── */
+
+export type LlmPurpose = "script_parse" | "storyboard" | "visualize" | "h3_prompt" | "script_write";
+
+export interface LlmRunResult<T = unknown> {
+  purpose: LlmPurpose;
+  data: T;
+  model?: string | null;
+  latencyMs: number;
+  usage?: Record<string, unknown>;
+  /** h3_prompt 回来的提示词是按哪个模式写的 */
+  mode?: H3PromptMode;
+  /** 后端的结构化自检结论（分镜规模/时长越界）。非阻塞，界面要如实显示 */
+  warnings?: string[];
+}
+
+/** 分镜规划回来的每一镜 */
+export interface LlmShot {
+  index: number;
+  sceneName: string;
+  characterNames: string[];
+  action: string;
+  dialogue: string;
+  visualPrompt: string;
+  durationSec: number;
+  cameraMovement: string;
+  shotSize: string;
+}
