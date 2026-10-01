@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Api } from "./api";
+import type { Api, ScriptTrashResult } from "./api";
 import type { LlmRunOpts } from "./api";
-import type { LlmPurpose } from "./types";
+import type { LlmPurpose, ScriptVersionRow, ScriptVersionSource, VersionBucket } from "./types";
+import { flushSaves, patchProject } from "./localStores";
 import { useApi } from "./apiClient";
 
 export const keys = {
@@ -18,6 +19,16 @@ export const keys = {
   users: ["users"] as const,
   styles: ["styles"] as const,
   storage: ["system", "storage"] as const,
+  /**
+   * 版本历史。每一族都给「前缀」和「具体键」两种：失效时整族一起清 ——
+   * 这些查询都很便宜，而漏掉一个分组就会出现"删了但卡片还挂着那张图"的假象。
+   */
+  mediaVersions: ["mediaVersions"] as const,
+  mediaVersionsOf: (projectId?: string | null, bucket?: string) => ["mediaVersions", projectId ?? "all", bucket ?? "all"] as const,
+  scriptVersions: ["scriptVersions"] as const,
+  scriptVersionsOf: (projectId?: string | null) => ["scriptVersions", projectId ?? "all"] as const,
+  trash: ["trash"] as const,
+  trashOf: (projectId?: string | null, bucket?: string) => ["trash", projectId ?? "all", bucket ?? "all"] as const,
 };
 
 export function useInstances() {
@@ -151,6 +162,14 @@ export function useWorkflowMutations() {
       mutationFn: ({ id, instanceId }: { id: string; instanceId: string }) => api.workflows.testRun(id, instanceId),
       onSuccess: () => inv(keys.jobs()),
     }),
+    rescan: useMutation({
+      mutationFn: ({ id, instanceId }: { id: string; instanceId?: string }) => api.workflows.rescan(id, instanceId),
+      onSuccess: () => inv(keys.workflows),
+    }),
+    patch: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: { autoSelect?: boolean; priority?: number } }) => api.workflows.patch(id, body),
+      onSuccess: () => inv(keys.workflows),
+    }),
   };
 }
 
@@ -227,4 +246,205 @@ export function useExportMutations(projectId: string) {
     xml: useMutation({ mutationFn: ({ shots, title }: { shots: Parameters<Api["exports"]["xml"]>[1]; title?: string }) => api.exports.xml(projectId, shots, title) }),
     jianying: useMutation({ mutationFn: (shots: Parameters<Api["exports"]["jianying"]>[1]) => api.exports.jianying(projectId, shots) }),
   };
+}
+
+/**
+ * 某一项目（或全部项目）某个 bucket 的所有版本。
+ *
+ * 故意做成「一次拉一桶、分组在内存里做」而不是逐张卡片查一个分组：资产页一次渲染几十张卡，
+ * 按分组查就是 N+1。分组键是 (kind, role, refId)，用 lib/versions.ts 的 groupOf 对上。
+ */
+export function useMediaVersions(scope: { projectId?: string | null; bucket?: VersionBucket; includeDeleted?: boolean }) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.mediaVersionsOf(scope.projectId ?? null, scope.bucket),
+    queryFn: () =>
+      api.versions.media({
+        projectKey: scope.projectId ?? undefined,
+        // 没有 project id 就是"全部项目"视图，必须显式说出来，否则后端按漏传处理
+        allProjects: !scope.projectId,
+        bucket: scope.bucket,
+        includeDeleted: scope.includeDeleted,
+      }),
+    staleTime: 30_000,
+  });
+}
+
+export function useScriptVersions(projectId: string | null | undefined, includeDeleted = false) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.scriptVersionsOf(projectId ?? null),
+    queryFn: () => api.versions.script(projectId ?? "", { includeDeleted }),
+    enabled: !!projectId,
+    staleTime: 30_000,
+  });
+}
+
+/** 生成回收站。列表不轮询：倒计时是天级别的，进来查一次就够 */
+export function useTrash(scope: { projectId?: string | null; bucket?: VersionBucket } = {}) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.trashOf(scope.projectId ?? null, scope.bucket),
+    queryFn: () => api.versions.trash({ projectKey: scope.projectId ?? undefined, allProjects: !scope.projectId, bucket: scope.bucket }),
+    staleTime: 15_000,
+  });
+}
+
+/**
+ * 版本历史与回收站的全部写操作。
+ *
+ * 为什么每个动作都把 mediaVersions/scriptVersions/trash/project/media/storage 一起失效：
+ * 摘指针、删索引行这些是**直接写 IndexedDB** 的，绕过 react-query；少失效一个，卡片就会
+ * 拿着旧快照继续显示那张已经进回收站的图 —— 正是用户明确否掉的"只标记没删干净"。
+ */
+export function useVersionMutations(defaultProjectId?: string | null) {
+  const api = useApi();
+  const inv = useInvalidate();
+  const after = (projectId: string | null | undefined = defaultProjectId) => {
+    if (projectId) {
+      inv(keys.project(projectId), keys.media(projectId), keys.scriptVersionsOf(projectId), keys.trashOf(projectId));
+    }
+    inv(keys.mediaVersions, keys.scriptVersions, keys.trash, keys.storage);
+  };
+  return {
+    /** 移进回收站：服务端软删 → 摘实体指针 → 删本地索引行（都在 api.media.remove 里按顺序做完） */
+    trashMedia: useMutation({
+      mutationFn: ({ id }: { id: string; projectId?: string | null }) => api.media.remove(id),
+      onSuccess: (_r, v) => after(v.projectId),
+    }),
+    restoreMedia: useMutation({
+      mutationFn: async ({ id, projectId }: { id: string; projectId?: string | null }) => {
+        await api.versions.restoreMedia(id);
+        // 恢复必须把服务端那行重新 adopt 回本地索引：进回收站时索引行和 blob 都清了，
+        // 不补回来卡片就是空的
+        const rows = await api.media.server({ ids: [id] });
+        for (const r of rows) await api.media.adopt(r);
+        after(projectId);
+      },
+    }),
+    purgeMedia: useMutation({
+      mutationFn: ({ id }: { id: string; projectId?: string | null }) => api.versions.purgeMedia(id),
+      onSuccess: (_r, v) => after(v.projectId),
+    }),
+    purgeScript: useMutation({
+      mutationFn: ({ uuid, projectId }: { uuid: string; projectId?: string | null }) =>
+        api.versions.purgeScript(uuid).then(() => after(projectId)),
+    }),
+    createScript: useMutation({
+      mutationFn: (body: Parameters<Api["versions"]["createScript"]>[0]) =>
+        api.versions.createScript(body).then((r) => {
+          after(body.projectKey);
+          return r;
+        }),
+    }),
+    /** 返回里带着 rawScript：调用方必须把它写回编辑器，否则正文和"当前版"会分家 */
+    setScriptCurrent: useMutation({
+      mutationFn: ({ uuid, projectId }: { uuid: string; projectId?: string | null }) =>
+        api.versions.setScriptCurrent(uuid).then((r) => {
+          after(projectId ?? r.current.projectKey);
+          return r;
+        }),
+    }),
+    trashScript: useMutation({
+      mutationFn: ({ uuid, projectId }: { uuid: string; projectId?: string | null }) =>
+        api.versions.trashScript(uuid).then((r: ScriptTrashResult) => {
+          after(projectId);
+          return r;
+        }),
+    }),
+    restoreScript: useMutation({
+      mutationFn: ({ uuid, projectId }: { uuid: string; projectId?: string | null }) =>
+        api.versions.restoreScript(uuid).then((r) => {
+          after(projectId);
+          return r;
+        }),
+    }),
+    trashProject: useMutation({
+      mutationFn: ({ projectId, name }: { projectId: string; name?: string }) =>
+        api.versions.trashProject(projectId, name).then((r) => {
+          after(projectId);
+          return r;
+        }),
+    }),
+  };
+}
+
+/**
+ * 剧本版本的三个动作，封在一处：任何宿主（剧本页、生成历史、以后的编辑助手）都不该
+ * 自己拼这些步骤 —— 少写一步就是丢正文或者指针和正文分家。
+ */
+export function useScriptVersionActions(projectId: string | null | undefined) {
+  const muts = useVersionMutations(projectId);
+
+  /**
+   * 生成完成时存一版。
+   *
+   * `previous` 是"这一版之前的正文"：项目第一次存版时，服务端会把它补成 V1
+   * （需求里那句"再次生成之后就存储之前的版本历史记录"）。分两次 POST 不行 ——
+   * 中间崩了就只剩一个被标成当前版的 V1，这次生成的正文永远进不了历史。
+   */
+  async function snapshot(o: {
+    text: string;
+    source: ScriptVersionSource;
+    snapshot?: ScriptVersionRow["snapshot"];
+    previous?: { text: string; writtenAt?: string | null };
+  }) {
+    if (!projectId || !o.text.trim()) return null;
+    const backfill =
+      o.previous && o.previous.text.trim() && o.previous.text !== o.text
+        ? { text: o.previous.text, ...(o.previous.writtenAt ? { writtenAt: o.previous.writtenAt } : {}) }
+        : undefined;
+    await flushSaves();
+    const row = await muts.createScript.mutateAsync({
+      projectKey: projectId,
+      text: o.text,
+      source: o.source,
+      snapshot: o.snapshot,
+      ...(backfill ? { backfillFrom: backfill } : {}),
+    });
+    await patchProject(projectId, {}, (p) => {
+      p.data.scriptVersionUuid = row.uuid;
+      p.data.scriptWrittenAt = row.writtenAt;
+    });
+    return row;
+  }
+
+  /**
+   * 把某一版设为当前，并把正文写回编辑器。
+   *
+   * 切之前先比对：工作正文和"当前版"的文字不一致，说明用户在编辑器里手改过 ——
+   * 那就先把这份手改存成一版（source=manual）再切。不做这一步，切版本就是
+   * 直接吃掉用户手打的字，而那正是"版本历史"最不该发生的事。
+   */
+  async function switchTo(
+    v: ScriptVersionRow,
+    ctx: { workingText: string; workingWrittenAt?: string | null; currentText?: string | null },
+  ) {
+    if (!projectId) return null;
+    const edited = ctx.currentText != null && ctx.workingText !== ctx.currentText && ctx.workingText.trim().length > 0;
+    if (edited) {
+      await muts.createScript.mutateAsync({
+        projectKey: projectId,
+        text: ctx.workingText,
+        source: "manual",
+        setCurrent: false,
+        ...(ctx.workingWrittenAt ? { writtenAt: ctx.workingWrittenAt } : {}),
+      });
+    }
+    const r = await muts.setScriptCurrent.mutateAsync({ uuid: v.uuid, projectId });
+    await flushSaves();
+    await patchProject(projectId, {}, (p) => {
+      p.data.rawScript = r.rawScript;
+      p.data.scriptVersionUuid = r.current.uuid;
+      p.data.scriptWrittenAt = r.current.writtenAt;
+    });
+    return { ...r, savedLocalEdit: edited };
+  }
+
+  /** 删掉一版。服务端承诺：正文不会被吃掉，编辑器里那份一个字都不动 */
+  async function trash(uuid: string) {
+    return muts.trashScript.mutateAsync({ uuid, projectId });
+  }
+
+  return { snapshot, switchTo, trash, busy: muts.createScript.isPending || muts.setScriptCurrent.isPending };
 }

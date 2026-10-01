@@ -69,11 +69,15 @@ async def _resolve(media_ids: list[int]) -> list[Media]:
     async with session_factory()() as s:
         rows = {
             m.id: m
-            for m in (await s.execute(select(Media).where(Media.id.in_(media_ids)))).scalars()
+            for m in (
+                await s.execute(select(Media).where(Media.id.in_(media_ids), Media.deleted_at.is_(None)))
+            ).scalars()
         }
+        # 必须排除软删行：不然用户从回收站里删掉的成片照样会被 ffmpeg 拼进导出，
+        # 「删除即从所有地方摘干净」这条就成了空话
     missing = [i for i in media_ids if i not in rows]
     if missing:
-        raise HTTPException(404, f"媒体 {missing} 不在库里（可能还没渲染完或被清理）")
+        raise HTTPException(404, f"媒体 {missing} 不在库里（可能还没渲染完、已进回收站，或已被清理）")
     ordered = [rows[i] for i in media_ids]
     root = Path(get_settings().media_root).resolve()
     for m in ordered:

@@ -124,7 +124,144 @@ def _check_prompt_shape(meta: dict[str, Any], prompt: str, row: PlanRow) -> None
             row.problems.append(f"项目模式是 wenwu，但提示词缺「{missing[0]}」—— 现在提交的是三段式回退文本")
 
 
-def plan_item(index: int, item: dict[str, Any], *, instances: dict[str, InstanceInfo], known_media: set[int] | None) -> PlanRow:
+#: 库里挑不出工作流时，按任务种类回落哪个内置模板。audio 没有内置模板 —— 只能靠库。
+FALLBACK_TEMPLATE = {"video": "h3_video", "image": "qwen_image"}
+
+
+def default_template_for(kind: str) -> str | None:
+    return FALLBACK_TEMPLATE.get(str(kind or ""))
+
+
+def _plan_workflow(index: int, item: dict[str, Any], *, title: str, kind: str,
+                   instances: dict[str, InstanceInfo], known_media: set[int] | None,
+                   workflows: list[dict[str, Any]], forced: str | None) -> PlanRow | None:
+    """按任务从库里选一条工作流，并把它要的东西与任务给的东西对一遍账。
+
+    返回 None = 「这条活儿归模板管」（库里一条都不合用，且没被显式指定）；
+    调用方会回落内置模板，并在参数表里写明是回落。
+    """
+    from .workflow_select import Task, rank, wf_row
+
+    if not workflows and not forced:
+        return None
+    rows = [wf_row(r) for r in workflows]
+    inst_id = item.get("instanceId") or item.get("instance_id")
+    info = instances.get(str(inst_id)) if inst_id else (next(iter(instances.values())) if len(instances) == 1 else None)
+    task = Task.from_params({"kind": kind, "slots": item.get("slots") or {},
+                             "instance_placement": info.placement if info else "local"})
+    row: PlanRow | None = None
+
+    if forced:
+        picked = next((r for r in rows if str(r["id"]) == str(forced)), None)
+        if picked is None:
+            return PlanRow(index=index, title=title, template=f"workflow:{forced}", kind=kind,
+                           instance=info.as_dict() if info else None, slots=item.get("slots") or {},
+                           problems=[f"工作流库里没有 id={forced} 这条（去 工作流库 确认 id，或改成自动选）"], blocked=True)
+        blocked = []
+        if picked["gaps"]:
+            blocked.append("这台实例还跑不动它：" + "；".join(
+                f"{g['class_type']}" + (f"（要装 {g['pack']}）" if g.get("pack") else "") for g in picked["gaps"][:3]))
+        if not _placement_matches(picked["executes_on"], task.placement):
+            blocked.append(f"这条只能在 {picked['executes_on']} 类实例上跑，当前选的是 {task.placement}")
+        row = PlanRow(index=index, title=title, template=f"workflow:{picked['id']}", kind=kind,
+                      instance=info.as_dict() if info else None, slots=item.get("slots") or {},
+                      problems=blocked, blocked=bool(blocked))
+        row.derived = {"workflowName": picked["name"], "chosenBy": "手动指定", "graphNodes": len(picked.get("graph") or {})}
+    else:
+        scored = rank(rows, task)
+        if not scored:
+            return None
+        best = scored[0]
+        picked = best.workflow
+        row = PlanRow(index=index, title=title, template=f"workflow:{picked['id']}", kind=kind,
+                      instance=info.as_dict() if info else None, slots=item.get("slots") or {},
+                      problems=list(best.reasons))
+        row.derived = {"workflowName": picked["name"], "chosenBy": "按任务自动选",
+                       "score": best.score, "graphNodes": len(picked.get("graph") or {}),
+                       "also": [s.as_dict() for s in scored[1:3]]}
+
+    signals = {s["name"]: s for s in (picked.get("signals") or [])}
+    missing = [n for n in ("prompt", "first_frame") if signals.get(n, {}).get("required") and n not in task.provided()]
+    if missing:
+        labels = "、".join(str(signals[n].get("label") or n) for n in missing)
+        row.problems.append(f"这条要「{labels}」，任务里没给")
+        row.blocked = True
+    bad_media = sorted({int(i) for ids in task.media.values() for i in ids} - set(known_media or set())) if known_media is not None else []
+    if bad_media:
+        row.problems.append(f"这些媒体不在库里：{bad_media[:6]}")
+        row.blocked = True
+
+    # 时长与步数从信号读：工作流自己带着作者调好的档位，任务没覆盖就用它自己的
+    res = (picked.get("requirements") or {}).get("resolution") or {}
+    frames = _int_of(task.params.get("frames") or (signals.get("frames") or {}).get("value") or 0)
+    seconds = task.params.get("seconds") or (signals.get("seconds") or {}).get("value")
+    if seconds:
+        frames = h3_length(float(seconds))
+    steps = _int_of(task.params.get("steps") or (signals.get("steps") or {}).get("value") or 0)
+    # 尺寸：任务直接给了就用任务的；工作流用 ResolutionSelector 时按换算结果看真实档位
+    width = _int_of(task.params.get("width") or res.get("width") or (signals.get("width") or {}).get("value") or 0)
+    height = _int_of(task.params.get("height") or res.get("height") or (signals.get("height") or {}).get("value") or 0)
+    if "aspect_ratio" in task.params or "megapixels" in task.params:
+        from .gen.workflow_inputs import ASPECT_RATIOS
+        from .workflow_select import translate_size   # 与填图同一套换算，两处不许说两套话
+
+        moved = translate_size(task, signals)
+        ratio = str(moved.get("aspect_ratio") or res.get("aspect_ratio") or "")
+        mega = float(moved.get("megapixels") or res.get("megapixels") or 0)
+        if ratio in ASPECT_RATIOS and mega:
+            import math
+
+            w_r, h_r = ASPECT_RATIOS[ratio]
+            mult = _int_of(res.get("multiple") or 8) or 8
+            scale = math.sqrt(mega * 1024 * 1024 / (w_r * h_r))
+            width = round(w_r * scale / mult) * mult
+            height = round(h_r * scale / mult) * mult
+    mp = _mp(width, height) or float(res.get("mp") or 0)
+    eta = None
+    basis = "参数表读不出分辨率/步数，不给估计"
+    if kind == "video" and frames > 0:
+        eta = _eta_video(frames, steps or 8, mp)
+        basis = f"{frames}帧（≈{round(frames / 24, 1)}s）× {steps or '工作流自带'}步 × {mp:.2f}MP，按 §11.1.1 的实测锚点线性外推"
+    elif kind == "image" and steps > 0 and mp > 0:
+        eta = _eta_image(steps, mp)
+        basis = f"{mp:.2f}MP × {steps}步，按 §11.1.1 的实测锚点线性外推"
+    row.derived.update({"frames": frames or None, "seconds": round(frames / 24, 2) if frames else None,
+                        "steps": steps or None, "width": width or None, "height": height or None,
+                        "mp": round(mp, 3) or None, "etaSeconds": eta, "etaBasis": basis})
+    # 本机的显存闸门对导入的工作流同样成立：作者那台机器不代表这台 24GB 卡
+    local_only = bool(row.instance and row.instance.get("placement") == "local")
+    if kind == "video" and local_only and mp > LOCAL_MP_BLOCK:
+        row.problems.append(f"这条工作流要出 {width}×{height}（{mp:.2f}MP），本机 24GB 单卡从没跑成过这个档（864×480 是实测上限）")
+        row.blocked = True
+    elif kind == "video" and local_only and mp > LOCAL_MP_WARN:
+        row.problems.append(f"{mp:.2f}MP 超出本机实测过的 0.41MP 档，这张卡上没有成功记录")
+    if kind == "video" and frames and frames / 24 < SHOT_SECONDS_WARN:
+        row.problems.append(f"这一条只有 {round(frames / 24, 1)}s，冷启动与权重加载的固定开销摊不平")
+    _check_prompt_shape(item.get("meta") or {}, task.prompt, row)
+    unfilled = [a for a in (picked.get("pending_media") or [])
+                if not any(a.split(".", 1)[0] == str(x) for ids in task.media.values() for x in ids)]
+    if unfilled and not row.blocked:
+        row.problems.append(f"这条工作流还有 {len(unfilled)} 个素材位是作者机器上的文件，本次任务没给到的会被撤掉")
+    return row
+
+
+def _placement_matches(executes_on: str, placement: str) -> bool:
+    if executes_on == "any":
+        return True
+    if executes_on == "local":
+        return placement in ("local", "cloud_self")
+    return placement == "cloud_runninghub"
+
+
+def _int_of(value: Any) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def plan_item(index: int, item: dict[str, Any], *, instances: dict[str, InstanceInfo],
+              known_media: set[int] | None, workflows: list[dict[str, Any]] | None = None) -> PlanRow:
     """一条待派发请求 → 一行参数表。"""
     template = str(item.get("template") or "")
     raw_slots = item.get("slots") or {}
@@ -146,9 +283,29 @@ def plan_item(index: int, item: dict[str, Any], *, instances: dict[str, Instance
         row.problems.append("这条是直接给的 graph：槽位、时长、提示词形状都不在参数表的校验范围内")
         return row
 
+    # 「按任务自动选工作流」：库里能干的先上，全都干不了才回落内置模板。
+    # 这一条必须在模板校验之前 —— 否则前端传来的 workflowId/auto 会被当成「没有生成模板」。
+    wf_id = item.get("workflowId") or item.get("workflow_id")
+    if wf_id or template in ("", "auto"):
+        row = _plan_workflow(index, item, title=title, kind=kind, instances=instances,
+                             known_media=known_media, workflows=workflows or [],
+                             forced=str(wf_id) if wf_id else None)
+        if row is not None:
+            return row
+
     if template not in TEMPLATES:
+        # 前端选了「自动」而库里挑不出能干的：回落内置模板，并且把回落这件事写在参数表上。
+        # 不写就会变成「界面说自动选、实际悄悄用了老路径」，用户永远看不到差别。
+        fallback = default_template_for(kind)
+        if template in ("", "auto") and fallback in TEMPLATES:
+            item = {**item, "template": fallback}
+            row = plan_item(index, item, instances=instances, known_media=known_media, workflows=[])
+            row.problems.insert(0, f"工作流库里没有合适这条任务的，回落内置模板「{fallback}」")
+            row.derived["chosenBy"] = "回落内置模板"
+            return row
         avail = "、".join(TEMPLATES) or "（没有已注册模板）"
-        return PlanRow(index=index, title=title, template=template, kind=kind, instance=None, slots=raw_slots, problems=[f"没有生成模板 {template}（可用：{avail}）"], blocked=True)
+        return PlanRow(index=index, title=title, template=template, kind=kind, instance=None, slots=raw_slots,
+                       problems=[f"没有生成模板 {template}（可用：{avail}）"], blocked=True)
 
     spec = TEMPLATES[template]
     row = PlanRow(index=index, title=title, template=template, kind=kind, instance=None, slots={})
@@ -196,6 +353,9 @@ def plan_item(index: int, item: dict[str, Any], *, instances: dict[str, Instance
             if s.max is not None and v > s.max:
                 row.problems.append(f"「{s.label}」{v} 超过上限 {s.max}")
                 row.blocked = True
+        if s.type == "enum" and s.options and v is not None and str(v) not in s.options:
+            row.problems.append(f"「{s.label}」的值 {v!r} 不在可选项里（{'、'.join(s.options)}）")
+            row.blocked = True
         if s.type in ("media", "media_list") and v:
             ids = v if isinstance(v, list) else [v]
             for m in ids:
@@ -261,12 +421,19 @@ def plan_item(index: int, item: dict[str, Any], *, instances: dict[str, Instance
     elif template == "h3_chain":
         segs = row.slots.get("segments") or []
         derived.update({"segmentCount": len(segs) if isinstance(segs, list) else 0, "etaSeconds": None, "etaBasis": "续拍链没有实测锚点，不给耗时估计"})
+        if not row.slots.get("first_frame"):
+            row.problems.append("链头没有起始帧：这条会以 t2v 起手，画面接续断了，只剩「接上一镜」那句文字锚点在接")
+        if not str(row.slots.get("archive_dir") or "").strip():
+            row.problems.append("没有存档目录：同一条承接链必须固定同一个目录名，否则前段没法从 latent 回放")
+            row.blocked = True
     row.derived = derived
     return row
 
 
-def plan_jobs(items: list[dict[str, Any]], *, instances: dict[str, InstanceInfo], known_media: set[int] | None) -> dict[str, Any]:
-    rows = [plan_item(i, it, instances=instances, known_media=known_media) for i, it in enumerate(items)]
+def plan_jobs(items: list[dict[str, Any]], *, instances: dict[str, InstanceInfo], known_media: set[int] | None,
+              workflows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    rows = [plan_item(i, it, instances=instances, known_media=known_media, workflows=workflows)
+            for i, it in enumerate(items)]
     # 被拦下的那条不会进队列，所以它的"耗时"不该算进总额
     eta = sum(int(r.derived.get("etaSeconds") or 0) for r in rows if not r.blocked)
     return {

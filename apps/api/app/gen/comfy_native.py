@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import struct
 import uuid
 from pathlib import Path
@@ -160,20 +161,41 @@ class ComfyNativeClient:
         data = r.json()
         errors = data.get("node_errors") or {}
         if errors:
-            head = next(iter(errors.items()))
-            node_id, node_err = head
-            detail = node_err.get("errors", [{}])[0] if isinstance(node_err, dict) and node_err.get("errors") else {}
-            raise GenError(
-                detail.get("detail", "节点校验失败"),
-                kind="comfy_validation",
-                node_id=node_id,
-                node_type=detail.get("node_type"),
-            )
+            raise self._node_errors_error(errors)
         return Submission(
             job_ref=data["prompt_id"],
             client_id=client_id,
             queue_number=data.get("number"),
             raw=data,
+        )
+
+    def _node_errors_error(self, errors: dict[str, Any]) -> GenError:
+        """把 ComfyUI 的 node_errors 摊成一句能照着改的话。
+
+        「节点校验失败」这四个字对修图毫无帮助 —— 真正的信息在每条 error 的
+        details/extra_info 里（例如 Required input is missing: images.image1）。
+        """
+        parts: list[str] = []
+        first_node: str | None = None
+        for node_id, node_err in list(errors.items())[:4]:
+            if first_node is None:
+                first_node = node_id
+            items = node_err.get("errors") or [{}] if isinstance(node_err, dict) else [{}]
+            for item in items[:3]:
+                if not isinstance(item, dict):
+                    continue
+                extra = item.get("extra_info") or {}
+                head = item.get("detail") or item.get("message") or "校验不通过"
+                if extra.get("details"):
+                    head = f"{head}｜{extra['details']}"
+                label = f"节点 {node_id}"
+                if extra.get("class_type"):
+                    label += f"（{extra['class_type']}）"
+                parts.append(f"{label}：{head}")
+        return GenError(
+            "；".join(parts) if parts else "节点校验失败",
+            kind="comfy_validation",
+            node_id=first_node,
         )
 
     def _validation_error(self, r: httpx.Response) -> GenError:
@@ -408,7 +430,7 @@ class ComfyNativeClient:
             bag = meta.get("input") or {}
             for group in ("required", "optional"):
                 for field_name, spec in (bag.get(group) or {}).items():
-                    if field_name not in _MODEL_WIDGETS:
+                    if field_name not in MODEL_WIDGETS:
                         continue
                     # 候选清单的形状是 [["a.safetensors", "b.safetensors"], {cfg}]
                     if not (isinstance(spec, list) and spec and isinstance(spec[0], list)):
@@ -432,13 +454,17 @@ class ComfyNativeClient:
         info = await self.object_info()
         out = {k: {"class_type": v["class_type"], "inputs": dict(v.get("inputs", {})), **({"_meta": v["_meta"]} if "_meta" in v else {})} for k, v in graph.items()}
         changes: list[dict[str, str]] = []
+        # 图里用哪个 H3 条件节点，决定该配哪一种模式的底模/LoRA：
+        # 作者的合并版（名字里 fl2va+ref2va 都写）与社区微调版在本机都只有官方单模底模可配。
+        classes = {str(v.get("class_type") or "") for v in out.values()}
+        mode_hint = "ref" if classes & _REF_MODE_NODES else ("fl" if classes & _FL_MODE_NODES else None)
         for node_id, node in out.items():
             class_type = node["class_type"]
             meta = info.get(class_type) or {}
             bag = meta.get("input") or {}
             for group in ("required", "optional"):
                 for field_name, spec in (bag.get(group) or {}).items():
-                    if field_name not in _MODEL_WIDGETS:
+                    if field_name not in MODEL_WIDGETS:
                         continue
                     if not (isinstance(spec, list) and spec and isinstance(spec[0], list)):
                         continue
@@ -449,21 +475,26 @@ class ComfyNativeClient:
                     # 同一节点上的 `type` 输入声明了这颗权重的用途（CLIPLoader.type=qwen_image）。
                     # 带着它去解析，才不会把「同族但用途不对」的大文件当成最近匹配。
                     context = node["inputs"].get("type") if isinstance(node["inputs"].get("type"), str) else None
-                    resolved = await self.resolve_model_name(class_type, field_name, value, context=context)
+                    resolved = await self.resolve_model_name(class_type, field_name, value,
+                                                             context=context, mode=mode_hint)
                     if resolved and resolved in choices:
                         node["inputs"][field_name] = resolved
                         changes.append({"node": node_id, "field": field_name, "from": value, "to": resolved})
         return out, changes
 
-    async def resolve_model_name(self, class_type: str, field_name: str, wanted: str, *, context: str | None = None) -> str | None:
-        """把文档里的理想文件名换成本实例真实存在的那个。找不到返回 None。
+    async def resolve_model_name(self, class_type: str, field_name: str, wanted: str, *,
+                                 context: str | None = None, mode: str | None = None) -> str | None:
+        """把文档里的理想文件名换成本实例真实存在的那个。**族不对就返回 None，不许就近凑一个。**
+
+        这里出过事故：模糊匹配按「精度词最少」排序，本机最接近的 int8 权重是
+        `qwen_image_2.1_int8_convrot`，于是把 `MiniMax-H3-Ref2VA-int8_convrot` 配成了文生图模型 ——
+        提交上去不报“缺文件”，报的是采样阶段一堆看不懂的错。宁可留着原名让 missing_models
+        明说「实例上没有这个权重」。
 
         context 是同一节点上声明「用途」的那个输入的值 —— CLIPLoader 的 `type`
-        （"qwen_image" / "minimax"）。有它就必须先用它筛：本机实测踩过，模板要
-        `qwen3vl_8b_int8_convrot` 而实例没有，只按「同族 + 精度优先」会挑中
-        16.3GB 的 `qwen3vl_8b_bf16`，而真正该用的是 8.8GB 的
-        `qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot`（名字里就写着 qwen_image）。
-        选错的不只是大小，是编码器本身。
+        （"qwen_image" / "minimax"）。它只在**已经判定同族**之后用来加排序分，
+        不能当筛选的唯一依据：本机实测 `type=qwen_image` 的候选里那些
+        `qwen3.5_9b_..._pe_t2i/pe_i2i` 是提示词扩写器，不是 DiT 的文本编码器。
         """
         info = await self.object_info(class_type)
         meta = info.get(class_type) or {}
@@ -477,26 +508,24 @@ class ComfyNativeClient:
         for c in choices:
             if c.lower().replace("_", "") == lowered:
                 return c
-        token = (context or "").lower().replace("_", "").replace("-", "")
-        keyed = [c for c in choices if token and token in c.lower().replace("_", "").replace("-", "")]
-        family = _model_family(wanted)
-        same_family = [c for c in choices if _model_family(c) == family and family]
-
         wants_edit = any(tok in wanted.lower() for tok in ("i2i", "edit", "ref"))
+        token = (context or "").lower().replace("_", "").replace("-", "")
 
-        def rank(c: str) -> tuple[int, int, int]:
-            low = c.lower()
+        eligible = [c for c in choices if _same_model_family(wanted, c, mode=mode)]
+        if not eligible:
+            return None
+
+        def rank(c: str) -> tuple[int, int, int, int]:
+            low = c.lower().replace("_", "").replace("-", "")
             lighter = 0 if any(x in low for x in ("int8", "fp8", "nvfp4", "awq")) else 1
+            # 同族里再按用途分：带上了实例声明的 type（minimax/qwen_image）的先来
+            keyed = 0 if token and token in low else 1
             # t2i / i2i 是两个不同用途的编码器，长度一样时会并列。
             # 请求里没提 edit/i2i 就默认要文生图那个，别让并列随机决定画质。
             role = 0 if (wants_edit == (("i2i" in low) or ("edit" in low))) else 1
-            return (lighter, role, len(c))
+            return (keyed, lighter, role, len(c))
 
-        # 用途词优先于「同族」：族名相近但用途不对的编码器，加载进来也是废图
-        for pool in (keyed, same_family, choices):
-            if pool:
-                return sorted(pool, key=rank)[0]
-        return _closest(wanted, choices)
+        return sorted(eligible, key=rank)[0]
 
     async def cancel(self, sub: Submission) -> bool:
         ok = await self.interrupt(sub.job_ref)
@@ -511,7 +540,7 @@ class ComfyNativeClient:
         await self._client.aclose()
 
 
-_MODEL_WIDGETS = {"unet_name", "ckpt_name", "clip_name", "vae_name", "model_name", "lora_name"}
+MODEL_WIDGETS = {"unet_name", "ckpt_name", "clip_name", "vae_name", "model_name", "lora_name"}
 
 # 同一模型的不同精度档。判断「是不是同一个模型」时要先去掉这些词，
 # 否则 qwen3vl_8b_int8_convrot 与 qwen3vl_8b_bf16 会被算成不相似（本机实测就撞上了）。
@@ -521,12 +550,112 @@ _PRECISION_TOKENS = (
 )
 
 
-def _model_family(name: str) -> str:
-    """把文件名压成「模型家族」指纹：去分隔符、去精度词、去扩展名痕迹。"""
-    base = name.lower().replace("_", "").replace("-", "").replace(".", "")
+#: 用「全能参考」条件的节点：需要 Ref2VA 底模
+_REF_MODE_NODES = {"MiniMaxH3ReferenceToVideo", "RHMiniMaxH3RefGen", "MiniMaxH3FunControlNetApply"}
+#: 用「首尾帧」条件的节点：需要 FL2VA 底模
+_FL_MODE_NODES = {"MiniMaxH3ImageToVideo", "ComfyCloudMiniMaxH3FirstLastFrameToVideoNode"}
+
+#: 表示「这是哪个模型」的词根。文件名里带这些前缀的词都归到同一个族（qwen3vl / qwen3 / qwen 同族）。
+_FAMILY_ROOTS = ("minimax", "qwen", "anima", "kelin", "flux", "sdxl", "sd3", "wan", "hunyuan",
+                 "ltx", "mimo", "pixverse", "indextts", "whisper", "tae", "cosmos", "cogview", "ideogram")
+#: 族名的补充判定：h3 只作为 MiniMax 的型号词出现，单独出现时也算一个族
+_FAMILY_EXTRA = {"h3"}
+#: 同一族里的互斥模式词：fl2va(首尾帧) 与 ref2va(全能参考) 是两个不同的权重，装错就出废片。
+_MODE_GROUPS = ({"fl2va", "fl2v"}, {"ref2va", "ref2v"})
+_MODE_BY_HINT = {"fl": 0, "ref": 1}
+#: 互斥的角色词：视频 VAE 与音频 VAE 是两个文件，名字里都写着角色，不能互换。
+_ROLE_GROUPS = ({"video"}, {"audio"})
+#: 规格词：文件名里写了就必须对上，不能拿 32B 的编码器冒充 8B 的。
+#: 不含 remix/hybrid —— 那是「同一模型的微调/合并版」，本机只有官方底模时，
+#: 拿底模替代是对的，但必须在改动清单里说清楚（画面风格会变）。
+_SPEC_TOKENS = {"32b", "14b", "8b", "7b", "06b", "6b", "12hz", "24k", "upscaler"}
+
+
+def _name_tokens(name: str) -> set[str]:
+    """文件名 → 词集。只按非字母数字切，不能再把 fl2va 拆成 fl/2/va ——
+    拆了之后「模式词互斥」这条规则永远命中不了，Ref2VA 会跟 FL2VA 并列（本机实测踩过）。"""
+    base = re.sub(r"\.(safetensors|ckpt|pt|pth|bin|gguf|onnx)$", "", str(name).lower())
+    toks = {p for p in re.split(r"[^a-z0-9]+", base) if p}
     for token in _PRECISION_TOKENS:
-        base = base.replace(token, "")
-    return base
+        toks.discard(token)
+    toks -= {"comfyui", "comfy", "convrot", "scaled", "pruned", "fast", "e4m3fn", "e5m2",
+             "v", "s", "ckpt", "pt", "bin", "gguf", "pth", "onnx"}
+    return toks
+
+
+def _group_of(tokens: set[str], groups: tuple[set[str], ...]) -> set[int]:
+    return {i for i, group in enumerate(groups) if tokens & group}
+
+
+def _group_conflict(w: set[str], c: set[str], groups: tuple[set[str], ...], *, require: bool) -> bool:
+    """两组词在三类互斥组里的归属：归属不同即冲突；require=True 时 wanted 有而候选没有也算冲突。"""
+    wg, cg = _group_of(w, groups), _group_of(c, groups)
+    if wg and cg and wg != cg:
+        return True
+    return bool(require and wg and not cg)
+
+
+def _families(tokens: set[str]) -> set[str]:
+    """把词集压成群族集合。"""
+    out = {t for t in tokens if t in _FAMILY_EXTRA}
+    for tok in tokens:
+        for root in _FAMILY_ROOTS:
+            if tok.startswith(root):
+                out.add(root)
+                break
+    return out
+
+
+def _same_model_family(wanted: str, candidate: str, *, mode: str | None = None) -> bool:
+    """判断两个文件名是不是同一个模型的不同精度/打包档。
+
+    四条硬规则，全部来自本机踩过的坑：大族词必须一致（不许把 Qwen-Image 当 MiniMax H3）、
+    模式词互斥且必须齐（fl2va 与 ref2va 不能互替，ref2v 的 LoRA 不能拿通用 turbo 冒充）、
+    角色词互斥（视频 VAE ≠ 音频 VAE）、写明的规格词必须对上（32B 编码器 ≠ 8B 编码器）。
+    两边一个共同词都没有就当不同模型。判不出来一律返回 False，
+    让 missing_models 明说「实例上没有这个权重」，而不是凑一个跑废片。
+
+    mode 是图里条件节点给的暗示（"fl"=首尾帧、"ref"=全能参考）。作者常用合并版
+    （名字里同时写 fl2va 和 ref2va）或社区微调版（remix），本机只有单一模式的官方底模 ——
+    这时按图上真正用的能力来定，而不是按文件名的字面差异判「不是同一个模型」。
+    """
+    w, c = _name_tokens(wanted), _name_tokens(candidate)
+    if not w or not c:
+        return False
+    wf, cf = _families(w), _families(c)
+    # 只要求「想要的族在候选里」：RunningHub 把 H3 的编码器叫 qwen3-vl-32b（不带 minimax 字样），
+    # 本机的实名是 qwen3vl_32b_minimax_h3_int8_convrot —— 反过来要求候选没有多余族词，
+    # 就会把同一个模型按打包命名判成不同模型，白报一次「缺权重」。
+    if wf and not (wf <= cf):
+        return False
+    if cf and not wf:
+        return False
+    if not (w & c):
+        return False
+    wg = {i for i, group in enumerate(_MODE_GROUPS) if w & group}
+    cg = {i for i, group in enumerate(_MODE_GROUPS) if c & group}
+    if mode in _MODE_BY_HINT and cg:
+        wg = {_MODE_BY_HINT[mode]}
+    if wg and cg and wg != cg:
+        return False
+    if wg and not cg:
+        return False
+    if _group_conflict(w, c, _ROLE_GROUPS, require=False):
+        return False
+    # Turbo LoRA 的步数档是硬属性：4step 的适配器挂到要跑 8 步的链上，出片会糊成一团，
+    # 但 ComfyUI 那边完全不报错 —— 只能在这里按词卡死。
+    w_steps = {t for t in w if re.fullmatch(r"\d+steps?", t)}
+    c_steps = {t for t in c if re.fullmatch(r"\d+steps?", t)}
+    if w_steps and c_steps and not (w_steps & c_steps):
+        return False
+    if (w & _SPEC_TOKENS) - (c & _SPEC_TOKENS):
+        return False
+    # 版本号类词（2512 / 21 / 10）：两边都写了就必须有交集
+    wver = {t for t in w if t.isdigit() and len(t) >= 2}
+    cver = {t for t in c if t.isdigit() and len(t) >= 2}
+    if wver and cver and not (wver & cver):
+        return False
+    return True
 
 
 def _closest(wanted: str, choices: list[str]) -> str | None:
@@ -579,6 +708,10 @@ def _outputs_from_history(entry: dict[str, Any]) -> list[OutputRef]:
                         node_id=node_id,
                     )
                 )
+    # 作者画布上的 PreviewImage 会一起进 history（type=temp）。有真正存盘产物时把它们剔掉：
+    # 不然任务列表里会多出一张作者自己看的对照小图，用户以为是这次生成的东西。
+    saved = [r for r in out if r.type != "temp"]
+    return saved or out
     return out
 
 

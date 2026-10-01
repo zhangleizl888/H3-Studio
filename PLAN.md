@@ -415,7 +415,14 @@ RunningHub 是国内一个托管 ComfyUI 的平台。调研后最关键的结论
 
 **我们已经比它强的，不要倒退**：PG 事务队列（`SKIP LOCKED` + 实例互斥 + 熔断 + 崩溃恢复 + SSE）远强于裸 JSON 断点；24GB 单卡的显存互斥让位（`gpu_arbiter` + `_restore_if_idle` 看门狗）它完全没有；权重文件名从 `/object_info` 反查这条我们比它彻底（它靠人对照模板改名）。
 
-**第①步（导演方法论 + 四模式）已落地**，数字见 §11.1.2。**第②步（提交前参数总表）已落地**：`app/job_plan.py` 是唯一的判据，`POST /api/jobs/plan` 出表、`/jobs` 与 `/jobs/batch` 走同一套准入（预览和真派发不会说两套话），导演台的批量按钮先弹参数表再派发，数值就地改完自动重问；表上的耗时一律标注是**按 §11.1.1 锚点外推、非实测**。剩下的顺序是 ③跨镜衔接锚点真正被生成逻辑消费 → ④水位契约 / 剪映拼合 / 首次运行向导。
+**第①步（导演方法论 + 四模式）已落地**，数字见 §11.1.2。**第②步（提交前参数总表）已落地**：`app/job_plan.py` 是唯一的判据，`POST /api/jobs/plan` 出表、`/jobs` 与 `/jobs/batch` 走同一套准入（预览和真派发不会说两套话），导演台的批量按钮先弹参数表再派发，数值就地改完自动重问；表上的耗时一律标注是**按 §11.1.1 锚点外推、非实测**。**第③步（跨镜衔接）已落地**，而且是四步里唯一一次「先补死字段再谈新字段」：
+
+- `Shot.continuityAnchor` 是**文字接续**，storyboard 用途把它设成必填（首镜写 N/A），`merge.buildShots` 写进 IndexedDB，`buildH3Prompt` 四种模式都把它织进正文（三段式追加「接上一镜：…」，六段/hybrid 写进 `[Shot 1]` 那句「本镜开场接住上一镜留下的…」，wenwu 写成块内一行「与上一镜的接续」），ShotDrawer 可直接改；后端 `validate_storyboard` 对缺锚点的非首镜出警告「没有锚点就是无理由跳切」。
+- 它和 `continuesPrevious` 是**两条独立机制**：前者是文字接续，后者是尾帧/latent 的画面接续。参考项目那条「禁止引用上一段尾帧」我们没有照抄，两条都留着，界面上也明写互不替代。
+- 顺手把两个从没被读过的配置接上了：`config.continuity` = 续拍链总开关（关掉时 `videoChainShots` 一律返回单镜），`config.continuityOverlapFrames` = h3_chain 的 `guide_frames`；两者以前只在默认值里躺着、界面上根本改不到，现在在 剧本页 → 项目配置 里有开关和 5/22/39/56 四档，关着的时候镜头抽屉会直接说明「这个勾现在不生效」。
+- 参数表同步加了两条：`guide_frames` 不在枚举里直接拦；链头没有起始帧时提示「会退成 t2v 起手，画面接续断了，只剩文字锚点在接」。
+
+剩下第④步：水位契约（持续超标要有等级和真正的暂停动作，参考项目的 stop 只是自己 sleep）、剪映拼合（`/export/jianying` 仍是 501，PLAN §13 原本写着不做 UI Automation，要重新决定）、首次运行向导（§9.2 规划过但没有代码）。
 
 ---
 
@@ -722,6 +729,70 @@ CREATE TABLE visual_styles (
   renderLogs: [{ ts, shotId, kind, status, model, durationMs, jobId, error }]
 }
 ```
+
+### 4.1 生成版本历史与生成回收站（2026-10-02 已实现，取代上面几段对媒体生命周期的设想）
+
+上面 §4 的 `media` 是 v1 计划稿。实际落地的生命周期多了三样：软删、保留期、版本序号，
+而它们互相咬合，口径写在这里免得下一个人靠读代码猜。
+
+```sql
+-- 计划稿里缺的那一列（初版迁移 5a243df1fb4d 就带着，但直到本次才有写入方）
+ALTER TABLE media ADD COLUMN deleted_at TIMESTAMPTZ;   -- 进「生成回收站」的时刻；NULL = 在用
+
+-- 新增表：剧本正文的版本。服务端此前完全不存剧本（POST /api/llm/run 同步返回后
+-- 前端直接盖掉 IndexedDB 里的 rawScript，上一版当场消失）
+CREATE TABLE script_versions (
+  id          BIGSERIAL PRIMARY KEY,
+  uuid        VARCHAR(36) NOT NULL UNIQUE,
+  project_key VARCHAR(64) NOT NULL,        -- 与 media 同样的软引用，服务端不持有项目实体
+  owner_id    BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  seq         INT NOT NULL,                -- V1/V2/… 的号
+  source      VARCHAR(16) NOT NULL DEFAULT 'ai-write'
+              CHECK (source IN ('ai-write','storyboard','manual')),
+  text        TEXT NOT NULL,               -- 列名就叫 text；ORM 侧因此用 sa_text 别名
+  snapshot    JSONB NOT NULL DEFAULT '{}', -- {script,characters,scenes,shots}：拆解结果一起进快照
+  is_current  BOOLEAN NOT NULL DEFAULT FALSE,
+  deleted_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 审计列：这行何时进库，不许改
+  written_at  TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 显示列：这版正文实际何时写就
+  UNIQUE (project_key, seq)
+);
+-- 一个项目最多一个当前版；软删行不占这个名额
+CREATE UNIQUE INDEX uq_script_versions_one_current ON script_versions(project_key)
+  WHERE is_current AND deleted_at IS NULL;
+```
+
+四条咬合规则（改动任何一条都会让用户丢东西）：
+
+1. **版本号 `V1..Vn` 按 `id`（剧本按 `seq`）升序、永不复用。** PG 的 `WHERE` 先于窗口函数求值，
+   所以 `deleted_at IS NULL` 绝不能和 `row_number()` 放同一层 —— 否则删掉 V2，V3 就改叫 V2，
+   用户从回收站恢复出来的"V2"和他记忆里的 V2 不是同一份。排序也不许用 `created_at`
+   （同事务批量插入时间戳并列，并列项顺序非确定）。
+2. **`max(seq)+1` 不能当发号器。** 彻底删除（purge）会把整行抹掉，`max(seq)` 跟着回落，
+   下一版就回收了用过的号。剧本的发号落在 `app_settings['scriptver:<项目键>']`，
+   这是个只增不减的计数器；不为此加表。
+3. **「当前版本」两边不是一套机制，且是刻意的。** 图片/视频 = 项目实体里的指针
+   （`refMediaIds[0]`、`keyframes[].mediaId` + `start/endFrameMediaId` 镜像、`videoMediaIds[0]`；
+   时间轴/导出/提示词页三处下游都取首位）—— **不给 `media` 加服务端 `is_current`**，
+   否则就是两个会互相打架的真相（项目实体按 A 方案活在浏览器 IndexedDB）。
+   剧本 = `script_versions.is_current` 列，设当前时顺带把正文写回 `rawScript`。
+4. **删除的三步顺序固定：服务端置 `deleted_at` → 前端摘实体指针 → 删本地索引行。**
+   `deleted_at` 一置，服务端所有读路径（`GET /api/media`、导出、存储统计）就把这行藏了，
+   所以**删除响应必须自带** path/分组/`promoteCandidateId`（同组最新存活那一版）。
+   顺序颠倒会闪一帧"指针指向已被摘掉的索引行"，每张卡片亮一次占位块。
+
+`written_at` 的存在理由：V1 往往是把用户**早就写好**的正文在首次生成时补存的，
+它和 V2 在同一次请求里插入 —— 拿 `created_at` 当显示时间会让 V1 看起来比 V2 还晚，
+按时间排序的界面看到这种结果就干脆不显示 V1（用户报的"剧本 V1 不显示时间"根因即此）。
+信任规则：只有 `source='manual'` 与带 `backfillFrom` 的补存接受前端传来的时间，且夹到
+`min(客户端时间, now())`；其余一律服务端时钟。缺时间就显示"时间未知"，**禁止兜底成当前时间**。
+
+回收站保留期 `H3_TRASH_RETENTION_DAYS`（默认 **100 天**）由 `app/purge.py:TrashPurger` 兑现：
+开机扫一趟 + 之后每 6 小时一趟，**独立 asyncio 任务，不挂派发循环** —— `dispatch_once` 是
+单卡仲裁看门狗（`_restore_if_idle` 必须第一条、`_has_work_for` 必须前置判空）的承重结构，
+而回收要做阻塞磁盘 I/O。`POST /api/system/gc` 现在也走同一个 `purge_expired`
+（它此前写着"超过 7 天"却完全没筛天数，任何软删行都会被立刻清掉）。
+删除是**先 unlink 再 DELETE 行**：指向已删文件的行是谎言，没行的文件是泄漏。
 
 ---
 
@@ -1429,6 +1500,44 @@ POST   /api/projects/{id}/export/pack
 WS     /ws/task?token=&jobs=1,2,3
 ```
 
+### 10.1 版本历史与生成回收站（2026-10-02 已实现，`app/api/routes_versions.py`）
+
+读用 `login_gate`；**写用 `dispatch_gate`**（admin|editor）—— 删版本和花 GPU 一样有后果，
+viewer 不许删。目前没有逐行归属校验（生成的 `media` 行 `owner_id` 根本没写值），
+这是单机内网作用域而非权限，别当成 RBAC 已做。
+
+```
+# 媒体版本：把 media 行按 (project_key, kind, role, ref_id) 数成 V1..Vn
+GET    /api/media-versions?project_key=&all_projects=&bucket=image|video&role=&ref_id
+                          &include_deleted=&only_deleted=&limit
+                          → 每行多带 version/versionCount/deletedAt/purgeAfter/daysLeft/title
+DELETE /api/media/{id}                 软删（进生成回收站）。回 groupRemaining + promoteCandidateId
+POST   /api/media/{id}/restore         文件已不在盘上 → 410（不恢复出一个点开 404 的版本）
+DELETE /api/media/{id}/purge           彻底删（连文件）。必须先进过回收站，否则 400
+
+# 剧本版本
+GET    /api/script-versions?project_key=&include_deleted=
+POST   /api/script-versions            {projectKey,text,source,snapshot?,writtenAt?,backfillFrom?,setCurrent?}
+POST   /api/script-versions/{uuid}/current   → {current, rawScript}（前端负责写回编辑器）
+DELETE /api/script-versions/{uuid}     软删。删的是当前版时自动顶上剩下 seq 最大的一版
+POST   /api/script-versions/{uuid}/restore   回 promotedToCurrent（恢复不抢当前版）
+DELETE /api/script-versions/{uuid}/purge      204
+
+# 生成回收站（两类合一张表，按删除时间倒序）
+GET    /api/trash?project_key=&all_projects=&bucket=script|image|video
+       → {retentionDays, totalBytes, items:[{key,kind,bucket,version,versionCount,bytes,
+          deletedAt,purgeAfter,daysLeft,filePresent,title?,textPreview?,media?}]}
+POST   /api/projects/{key}/trash       删项目时整批进回收站；顺手把项目名记进 app_settings.project_names
+```
+
+两个刻意的取舍：**没有** `POST /api/media/{id}/current`（媒体的"当前"在服务端不存在，见 §4.1
+第 3 条）；**没有**扩展 `GET /api/media` 加 `include_deleted` —— 它三个调用方要的都是"只给活行"，
+塞开关会逼每个调用方重新过滤，还会把窗口函数压进生成期 2 秒轮询的热路径。
+
+`GET /api/media/{id}/raw` 新增 `?trashed=1`：软删行默认 404，带这个参数才放行 —— 回收站
+要能在恢复之前预览。`origin.jobTitle`（派发时写进 `media.origin`）是全局视图里版本的标题来源，
+因为项目实体不在服务端。
+
 ---
 
 ## 11. 里程碑
@@ -1508,6 +1617,29 @@ WS     /ws/task?token=&jobs=1,2,3
 方法论只注入两个用途、缺段报错文案、分镜规模警告）；`e2e_director.py` 跑真模型（自己让卡、自己收尾）。
 另外记一笔环境事实：`app_settings.gpu_arbiter` 里那条可复现命令行**在恢复之后会被清掉**，
 所以脚本不能长期依赖它复现 llama-server——真机验收第二遍时就没取到，只能按已知参数重新起。
+
+### 11.1.3 版本历史与生成回收站实测（2026-10-02）
+
+结论层面能复跑的检查都过了，记录数字与**证伪过的写法**：
+
+| 检查 | 结果 |
+|---|---|
+| `script_versions` 结构与三条约束 | 真插入探针：`uq_script_versions_project_seq`、部分唯一 `uq_script_versions_one_current`、`ck_script_versions_source` 逐条撞出来；「旧当前版软删后新版可当 current」也验了 |
+| 版本序号 | `tests/test_versions_live.py` + 真 HTTP：**真库 26 行产物分 12 组、8 个多版本组，version 全为 1..n 连续且 versionCount 等于组大小**（例：`video/s_nh7mezl9 → V1#68, V2#76, V3#77`） |
+| 100 天到期真删 | `tests/test_trash_purge_live.py`：造超期 101 天 / 差一天 99 天 / 活行 / 路径越界 / 文件已丢五种行 → 只有 101 天的连文件带走，99 天与活行分毫未动，越界行既不删也不 unlink（进 `skipped`），缺文件的算孤儿；`dry_run` 一趟零改动 |
+| 剧本存版 | AI 续写与拆解各存一版；首次存版把旧正文补成 V1 且 `backfilled=true`；`storyboard` 传过去时间被夹到当下、`manual` 采纳；删当前版自动顶上、恢复不抢；未进回收站就 purge → 400；**彻底删掉最高号后下一号不复用** |
+| 删除摘干净 | 演示模式页面实测：`characters[].refMediaIds` 由 `["md_char_b"]` 变 `[]`、`status` 退回 `pending`，同时该条在「生成回收站」表里可见（100 天） |
+| 导出 | `_resolve` 补软删过滤后，被删的成片请求合并 → 404（此前会被 ffmpeg 拼进导出） |
+
+写错又被测试拽回来的几处，留在这里当反面教材：`dict[str, Any>` 手误（右括号打成 `>`，PEG 报的行号其实是准的，
+是我先入为主怪给了并发会话）；`written_at` 当排序键导致 V1/V3 时序倒挂；`(after-now).days` 向下取整让
+刚删完的条目显示"剩 99 天"；`dry_run` 版本最初**照样 unlink 文件**只跳过删行（正好造出"行指向不存在的文件"
+这个最坏的谎言）；Python 侧分组键漏了 `ref_id` 优先，导致同组兄弟行全对不上；`media.remove` 对本地图
+（无服务端行）跳过摘指针。
+
+**这台机器验不了的**：内嵌浏览器视口 ~530px 被前端 ≥1024px PC 墙挡住、`take_screenshot` 直接报不可用，
+所以"精简条塞不塞得进卡片""回收站表格会不会溢出""视频格显示的是不是首帧封面"三类**要人在桌面 Chrome 里目视**。
+真后端模式（`VITE_USE_MOCK=false`）的界面当时没跑 —— 后端上有另一条会话的生成任务在跑，不重启它。
 
 ---
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, ChevronLeft, ChevronRight, Film, MapPin, MessageSquare, Scissors, Sparkles, Video, Wand2, X } from "lucide-react";
 import { Badge, Button, Input, MachChip, Panel, Progress, Select, StateGlyph, type StateKey, Toggle } from "../../../components/ui";
+import { SplitHandle, usePane } from "../../../components/SplitPane";
 import { videoChainShots, videoRequest } from "../../../lib/generate";
 import type { GenTarget } from "../../../lib/generate";
 import { genKey } from "../../../lib/useGenerate";
@@ -40,6 +41,7 @@ export function ShotDrawer({
   onNext: () => void;
   onSplit: (shot: Shot) => Promise<void>;
 }) {
+  const pane = usePane("director.drawer", 430, 340, 820);
   const [llm, setLlm] = useState<null | "action" | "moderation" | "split">(null);
   const [kfClaim, setKfClaim] = useState<FrameType | null>(null);
   const { data: instances } = useInstances();
@@ -114,6 +116,8 @@ export function ShotDrawer({
         台词: shot.dialogue ?? "",
         场景: scene ? `${scene.location || scene.name}${scene.time ? `·${scene.time}` : ""}` : "未指定",
         出场: chars.map((c) => `${c.name}（${c.desc}）`),
+        上一镜: prevShot ? `${prevShot.action}${prevShot.dialogue ? `｜台词「${prevShot.dialogue}」` : ""}` : "（本片第一镜）",
+        接上一镜: shot.continuityAnchor ?? "",
         起始帧: frameOf(shot, "start")?.visualPrompt ?? "",
         现有提示词: shot.videoPrompt?.trim() || h3PromptText(shot.h3Prompt),
       });
@@ -131,6 +135,7 @@ export function ShotDrawer({
         integrated: keep(d.integrated, shot.h3Prompt.integrated),
         soundscape: keep(d.soundscape, shot.h3Prompt.soundscape),
         music: keep(d.music, shot.h3Prompt.music),
+        aiRewrittenAt: new Date().toISOString(),
       };
       if (mode === "six_section" || mode === "hybrid") {
         next.subjectDefinitions = keep(d.subjectDefinitions, shot.h3Prompt.subjectDefinitions ?? "");
@@ -162,7 +167,12 @@ export function ShotDrawer({
   }
 
   return (
-    <aside className="flex h-full w-[430px] flex-none flex-col border-l border-hairline bg-slate/80 backdrop-blur-2xl" aria-label="镜头详情">
+    <aside
+      style={pane.style}
+      className="relative flex h-full w-[var(--pane-w)] flex-none flex-col border-l border-hairline bg-slate/80 backdrop-blur-2xl"
+      aria-label="镜头详情"
+    >
+      <SplitHandle pane={pane} side="right" label="镜头详情栏宽度" />
       <header className="flex flex-none items-start gap-2.5 border-b border-hairline bg-sheen px-3 py-2.5">
         <span className="mono grid h-8 w-8 flex-none place-items-center rounded-panel border border-chrome/25 bg-chrome/10 text-caption font-bold text-chrome">
           {cardLabel(shot)}
@@ -225,6 +235,27 @@ export function ShotDrawer({
                 <MessageSquare className="h-3 w-3" /> 台词
               </span>
               <CommitText ariaLabel="台词" value={shot.dialogue ?? ""} rows={2} placeholder="留空表示这一镜没有台词" onCommit={(v) => ctx.patchShot(shot.id, { dialogue: v })} />
+            </div>
+            <div>
+              <span className="label">接上一镜（锚点）</span>
+              <CommitText
+                ariaLabel="衔接锚点"
+                value={shot.continuityAnchor ?? ""}
+                rows={2}
+                placeholder="动作方向 / 视线目标 / 同一道光 / 同一个道具 / 同一种轮廓 / 同一段声音 / 同一股受力，写成一句看得见的话"
+                onCommit={(v) => ctx.patchShot(shot.id, { continuityAnchor: v })}
+              />
+              <p className="mt-1 text-[10.5px] leading-snug text-ink-mute">
+                {prevShot ? (
+                  <>
+                    上一镜是 <span className="mono">{cardLabel(prevShot)}</span>：{prevShot.action || "没写动作"}。这句会被拼进视频提示词，属于
+                    <span className="text-ink-dim">文字接续</span>；勾了「承接上一镜」还另有一路尾帧的
+                    <span className="text-ink-dim">画面接续</span>，两条互不替代。
+                  </>
+                ) : (
+                  "这是本片第一镜，没有要接的东西。"
+                )}
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <label className="block space-y-1">
@@ -327,9 +358,11 @@ export function ShotDrawer({
                     label={<span className="text-caption">承接上一镜（无缝续拍）</span>}
                     hint={
                       <span className="text-caption leading-snug text-ink-mute">
-                        {shot.continuesPrevious
-                          ? `本镜顺着「${cardLabel(prevShot)}」的结尾继续画，中间那些镜的首尾帧图不再介入；产物是从链头接到底的一条片。`
-                          : "关着就是本镜单独出片（首帧 / 首尾帧）。"}
+                        {!ctx.project.config.continuity
+                          ? "项目配置里「允许串成续拍链」已经关掉，这个勾现在不生效：出片仍会逐镜单独走，接续只剩「接上一镜」那句文字锚点。"
+                          : shot.continuesPrevious
+                            ? `本镜顺着「${cardLabel(prevShot)}」的结尾继续画，中间那些镜的首尾帧图不再介入；产物是从链头接到底的一条片。重叠帧 ${ctx.project.config.continuityOverlapFrames} 帧，在 剧本页 → 项目配置 里改。`
+                            : "关着就是本镜单独出片（首帧 / 首尾帧）。"}
                       </span>
                     }
                   />
@@ -357,10 +390,13 @@ export function ShotDrawer({
                 <ul className="grid grid-cols-3 gap-1.5">
                   {shot.videoMediaIds.map((mid, i) => {
                     const m = mediaOf(ctx, mid);
+                    // 成片本身没有可显示的封面（后端不出缩略图），用这一镜的首帧静帧当封面：
+                    // 那正是这段视频的第一帧。缺首帧时 MediaImage 会退回视频占位块，不会变破图。
+                    const poster = mediaOf(ctx, frameMediaId(shot, "start"));
                     return (
                       <li key={mid}>
                         <button type="button" onClick={() => ctx.onPlay(mid, `${cardLabel(shot)} 成片 ${i + 1}`)} className="block w-full text-left">
-                          <MediaImage media={m} seedText={mid} aspect={ctx.aspect} label={<span className="mono">{m?.durationMs ? `${(m.durationMs / 1000).toFixed(1)}s` : `第 ${i + 1} 段`}</span>} />
+                          <MediaImage media={poster} seedText={mid} aspect={ctx.aspect} label={<span className="mono">{m?.durationMs ? `${(m.durationMs / 1000).toFixed(1)}s` : `第 ${i + 1} 段`}</span>} />
                         </button>
                       </li>
                     );

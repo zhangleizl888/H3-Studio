@@ -125,6 +125,8 @@ async def clean_queue():
             "DELETE FROM jobs",
             "DELETE FROM media",
             "DELETE FROM gen_instances",
+            # 剧本版本也在这套活库上跑，不清就会攒残留并撞 uq_script_versions_project_seq
+            "DELETE FROM script_versions",
         ):
             await s.execute(text(stmt))
         await s.commit()
@@ -133,7 +135,7 @@ async def clean_queue():
     # 派发循环会真的去 ComfyUI 提交它们（本机实测踩过：两个测试残留任务把
     # 队列占住，还顺带触发了单卡仲裁把 llama-server 停了）。
     async with session_factory()() as s:
-        for table in ("instance_locks", "jobs", "media", "gen_instances"):
+        for table in ("instance_locks", "jobs", "media", "gen_instances", "script_versions"):
             await s.execute(text(f"DELETE FROM {table}"))
         await s.commit()
 

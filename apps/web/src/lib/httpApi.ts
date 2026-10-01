@@ -1,7 +1,18 @@
-import type { Api, ExportFile, GenerateRequest, JobPlanResult } from "./api";
-import type { GenInstance, Job, LlmBackend, LlmRunResult, Media, User } from "./types";
+import type { Api, ExportFile, GenerateRequest, JobPlanResult, MediaTrashResult, ScriptTrashResult } from "./api";
+import type {
+  GenInstance,
+  Job,
+  LlmBackend,
+  LlmRunResult,
+  Media,
+  ParsedScript,
+  ScriptVersionRow,
+  TrashItem,
+  User,
+} from "./types";
 import * as local from "./localStores";
 import { accessToken, clearTokens, devAutoLogin, refreshTokenValue, setTokens } from "./tokens";
+import { dereference } from "./versions";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -79,6 +90,32 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 const j = (body: unknown) => JSON.stringify(body);
 
+/**
+ * multipart 版请求。不能复用 req()：raw() 会写死 Content-Type: application/json，
+ * 而 FormData 的 boundary 必须让浏览器自己生成，写了就是一份没人认领的 body。
+ * 认证与错误处理照 req() 抄一遍：带 Bearer、401 换票重试一次、detail/hints 拼成人话。
+ */
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const send = () => {
+    const token = accessToken();
+    return fetch(`${BASE}${path}`, { method: "POST", body: form, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  };
+  let res = await send();
+  if (res.status === 401 && (await refreshOnce())) res = await send();
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const d = (await res.json()) as { detail?: string; message?: string; hints?: string[] };
+      msg = d?.detail ?? d?.message ?? msg;
+      if (d?.hints?.length) msg += `（${d.hints.join("；")}）`;
+    } catch {
+      /* 没有 JSON body */
+    }
+    throw new HttpError(res.status, msg);
+  }
+  return (await res.json()) as T;
+}
+
 /** 后端的 job 行字段是 camelCase（见 routes_jobs._job_out），这里只做前端要补的两件事 */
 function toJob(raw: Record<string, unknown>): Job {
   const j = raw as unknown as Job;
@@ -90,10 +127,12 @@ function jobBody(r: GenerateRequest) {
   return {
     template: r.template,
     slots: r.slots,
+    // template=auto 时 kind 必须由调用方给（选工作流按它过滤），不能再靠模板名字猜
     kind: r.kind ?? (r.template.includes("video") ? "video" : "image"),
     title: r.title,
     projectKey: r.projectId,
     instanceId: r.instanceId,
+    workflowId: r.workflowId,
     priority: r.priority ?? 100,
     meta: r.meta,
   };
@@ -112,9 +151,32 @@ function toMedia(raw: Record<string, unknown>, projectId: string): Media {
     mime: (raw.mime as string) ?? undefined,
     width: (raw.width as number) ?? null,
     height: (raw.height as number) ?? null,
+    fps: (raw.fps as number) ?? null,
+    thumbPath: (raw.thumbPath as string) ?? null,
     durationMs: (raw.durationMs as number) ?? null,
     createdAt: (raw.createdAt as string) ?? new Date().toISOString(),
+    // 下面这几项只有 /api/media-versions 与 /api/trash 会给；/api/media 返回的是"活行"
+    version: (raw.version as number) ?? null,
+    versionCount: (raw.versionCount as number) ?? null,
+    deletedAt: (raw.deletedAt as string) ?? null,
+    purgeAfter: (raw.purgeAfter as string) ?? null,
+    daysLeft: (raw.daysLeft as number) ?? null,
+    title: (raw.title as string) ?? null,
   } as Media;
+}
+
+/** 后端剧本版本行 → 前端。字段基本同名，只给 snapshot 兜个空对象 */
+function toScriptVersion(raw: Record<string, unknown>): ScriptVersionRow {
+  return { ...(raw as unknown as ScriptVersionRow), snapshot: (raw.snapshot as ScriptVersionRow["snapshot"]) ?? {} };
+}
+
+/**
+ * 软删一版产物。本地上传的参考图没有服务端行（path=idb:），也就进不了回收站，返回 null
+ * 让调用方照样把指针和本地索引清干净。
+ */
+async function trashMediaRow(id: string): Promise<MediaTrashResult | null> {
+  if (!/^\d+$/.test(id)) return null;
+  return req<MediaTrashResult>(`/api/media/${id}`, { method: "DELETE" });
 }
 
 /**
@@ -231,6 +293,20 @@ export const httpApi: Api = {
       return res.json();
     },
     validate: (graph, instanceId) => req("/api/workflows/validate", { method: "POST", body: j({ graph, instance_id: instanceId }) }),
+    /** 装了节点包 / 换了实例之后重算一次：从原始导出重改写，不累积上一次的改动 */
+    rescan: (id, instanceId) =>
+      req<{ workflow: Record<string, unknown>; report: Record<string, unknown> }>(
+        `/api/workflows/${id}/rescan${instanceId ? `?instance_id=${encodeURIComponent(instanceId)}` : ""}`,
+        { method: "POST" },
+      ),
+    patch: (id, body) => req<Record<string, unknown>>(`/api/workflows/${id}`, { method: "PATCH", body: j(body) }),
+    /** 只排序不建任务：这次任务会挑中哪条、凭什么是它 */
+    selectPreview: (kind, slots, instanceId) =>
+      req<{ candidates: { id: number; name: string; score: number; reasons: string[] }[]; provided: string[]; fallbackTemplate: string | null }>(
+        `/api/workflows/select?kind=${encodeURIComponent(kind)}&slots=${encodeURIComponent(JSON.stringify(slots))}${
+          instanceId ? `&instance_id=${encodeURIComponent(instanceId)}` : ""
+        }`,
+      ),
     remove: (id) => req(`/api/workflows/${id}`, { method: "DELETE" }),
     export: (id, format) => req(`/api/workflows/${id}/export?format=${format}`),
     slots: (id) => req(`/api/workflows/${id}/slots`),
@@ -256,18 +332,22 @@ export const httpApi: Api = {
     },
     async url(m) {
       if (!m) return null;
-      const cached = await local.cachedUrl(m.id);
+      // 回收站里的行服务端默认 404，必须带 ?trashed=1 才读得到（文件本来就在盘上，满保留期才真删）。
+      // 缓存键要分开写，否则恢复之后还在吃旧的 objectURL。
+      const trashed = !!m.deletedAt && !local.isLocalMedia(m);
+      const key = trashed ? `${m.id}:t` : m.id;
+      const cached = await local.cachedUrl(key);
       if (cached) return cached;
       let blob: Blob | null = null;
       if (local.isLocalMedia(m)) {
         blob = await local.localBlob(m);
       } else {
         // 产物一律经后端读：浏览器不该知道实例地址，也不该拿到会过期的 RunningHub 外链
-        const res = await raw(`/api/media/${m.id}/raw`);
+        const res = await raw(`/api/media/${m.id}/raw${trashed ? "?trashed=1" : ""}`);
         blob = res.ok ? await res.blob() : null;
       }
       if (!blob) return null;
-      return local.cacheUrl(m.id, blob);
+      return local.cacheUrl(key, blob);
     },
     async put(file, role, refId, projectId) {
       const kind = file.type.startsWith("video") ? "ref_video" : file.type.startsWith("audio") ? "ref_audio" : "ref_image";
@@ -286,8 +366,93 @@ export const httpApi: Api = {
       const rows = await req<Record<string, unknown>[]>(`/api/media?${q}`);
       return rows.map((r) => toMedia(r, filter.projectKey ?? ""));
     },
+    /** 移进生成回收站：服务端软删 → 摘实体指针 → 删本地索引行。顺序反了会闪一帧破图 */
     async remove(id) {
+      const result = await trashMediaRow(id);
+      const m = await local.getMedia(id);
+      // 指针一定要摘，不管这条有没有服务端行：本地上传图 trashMediaRow 返回 null，
+      // 但它在 refMediaIds / videoMediaIds 里同样占着一格，漏摘就是"只标记没删干净"
+      if (m?.projectId) {
+        await local.flushSaves();
+        await local.patchProject(m.projectId, {}, (p) => dereference(p, id, result?.promoteCandidateId ?? null));
+      }
+      local.releaseUrl(`${id}:t`);
       await local.deleteMedia(id);
+    },
+  },
+  versions: {
+    async media(filter) {
+      const q = new URLSearchParams();
+      if (filter.projectKey) q.set("project_key", filter.projectKey);
+      if (filter.allProjects) q.set("all_projects", "true");
+      if (filter.bucket && filter.bucket !== "script") q.set("bucket", filter.bucket);
+      if (filter.role) q.set("role", filter.role);
+      if (filter.refId) q.set("ref_id", filter.refId);
+      if (filter.includeDeleted) q.set("include_deleted", "true");
+      if (filter.onlyDeleted) q.set("only_deleted", "true");
+      const rows = await req<Record<string, unknown>[]>(`/api/media-versions?${q}`);
+      return rows.map((r) => toMedia(r, filter.projectKey ?? ""));
+    },
+    async script(projectKey, opts) {
+      const q = new URLSearchParams({ project_key: projectKey });
+      if (opts?.includeDeleted) q.set("include_deleted", "true");
+      return (await req<Record<string, unknown>[]>(`/api/script-versions?${q}`)).map(toScriptVersion);
+    },
+    async createScript(body) {
+      return toScriptVersion(await req<Record<string, unknown>>("/api/script-versions", { method: "POST", body: j(body) }));
+    },
+    async setScriptCurrent(uuid) {
+      const r = await req<{ current: Record<string, unknown>; rawScript: string }>(
+        `/api/script-versions/${encodeURIComponent(uuid)}/current`,
+        { method: "POST" },
+      );
+      return { current: toScriptVersion(r.current), rawScript: r.rawScript };
+    },
+    async trashScript(uuid) {
+      return req<ScriptTrashResult>(`/api/script-versions/${encodeURIComponent(uuid)}`, { method: "DELETE" });
+    },
+    async restoreScript(uuid) {
+      const r = await req<{ uuid: string; promotedToCurrent: boolean; current: Record<string, unknown> }>(
+        `/api/script-versions/${encodeURIComponent(uuid)}/restore`,
+        { method: "POST" },
+      );
+      return { ...r, current: toScriptVersion(r.current) };
+    },
+    async purgeScript(uuid) {
+      await req<void>(`/api/script-versions/${encodeURIComponent(uuid)}/purge`, { method: "DELETE" });
+    },
+    async trashMedia(id) {
+      return trashMediaRow(id);
+    },
+    async restoreMedia(id) {
+      await req<unknown>(`/api/media/${id}/restore`, { method: "POST" });
+    },
+    async purgeMedia(id) {
+      return req<{ deleted: number; bytes: number; orphans: number; locked: number; skipped: number }>(
+        `/api/media/${id}/purge`,
+        { method: "DELETE" },
+      );
+    },
+    async trashProject(projectKey, name) {
+      return req<{ mediaTrashed: number; scriptTrashed: number; bytes: number }>(
+        `/api/projects/${encodeURIComponent(projectKey)}/trash`,
+        { method: "POST", body: j({ name: name ?? null }) },
+      );
+    },
+    async trash(filter) {
+      const q = new URLSearchParams();
+      if (filter.projectKey) q.set("project_key", filter.projectKey);
+      if (filter.allProjects) q.set("all_projects", "true");
+      if (filter.bucket) q.set("bucket", filter.bucket);
+      const r = await req<{ retentionDays: number; totalBytes: number; items: Record<string, unknown>[] }>(`/api/trash?${q}`);
+      return {
+        retentionDays: r.retentionDays,
+        totalBytes: r.totalBytes,
+        items: r.items.map((it) => {
+          const media = it.kind === "media" ? toMedia(it, (it.projectKey as string) ?? "") : undefined;
+          return { ...(it as unknown as TrashItem), media };
+        }),
+      };
     },
   },
   jobs: {
@@ -324,6 +489,13 @@ export const httpApi: Api = {
     setPriority: (id, priority) => req(`/api/jobs/${id}`, { method: "PATCH", body: j({ priority }) }),
   },
   styles: { list: () => req("/api/styles") },
+  parse: {
+    script: (file) => {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      return postForm<ParsedScript>("/api/parse-script", form);
+    },
+  },
   users: {
     list: () => req("/api/users"),
     create: (body) => req("/api/users", { method: "POST", body: j(body) }),

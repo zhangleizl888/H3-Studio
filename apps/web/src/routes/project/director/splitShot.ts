@@ -43,6 +43,8 @@ export function buildSubShots(parent: Shot, list: LlmShot[], project: Project): 
       jobId: null,
       locked: false,
       parentShotId: parent.parentShotId ?? parent.id,
+      // 父镜的锚点只属于第一个子镜；后面的子镜接的是自己兄弟镜，得重新写
+      continuityAnchor: i === 0 ? (parent.continuityAnchor ?? "") : "",
       h3Prompt: { integrated: "", soundscape: "", music: "" },
     };
     sub.h3Prompt = buildH3Prompt(sub, scene, chars, project.config);

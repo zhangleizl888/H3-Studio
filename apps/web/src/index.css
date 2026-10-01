@@ -81,6 +81,16 @@
   --radius-sheet: 28px;
   --radius-strip: 0px;
   --radius-hairline: 1px; /* 1px 高的进度条：圆角再大就看不见了 */
+
+  /* —— 动效曲线 ——
+     四条曲线来自 beautifului.dev 的 AI 原生交互原型（21 个组件里反复出现的就这几条）：
+       glide  面板/卡片进入、展开收起：起步快、尾段长拖尾，界面「落」而不是「撞」
+       pop    徽标、按钮这类小件弹入：比 glide 更硬一点，带一点点回弹
+       std    颜色/圆角/位移这类状态切换：Material 的标准曲线
+     时长只用 160 / 260 / 300 / 350 / 400 五档，不要再造新数值。 */
+  --ease-glide: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-pop: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-std: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ============ 基线 ============ */
@@ -219,6 +229,117 @@ body {
   }
 }
 
+/* ============ 动效层：AI 对话界面的节奏 ============ */
+/* 规格里最关键的一条是「一次成型，不来回跳」：所有入场都带 both 填充，
+   动画开始前就按首帧渲染，避免元素先亮一下再退回去。
+   --i 是序号，由组件按位置写进 style，用于逐件错开（步长写死在下面，别让调用方改）。 */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+/* 展开：grid-template-rows 从 0fr 走到 1fr，内容高度未知也能动 —— 规格里展开推理轨迹用的就是它 */
+@keyframes open-row {
+  from {
+    grid-template-rows: 0fr;
+  }
+  to {
+    grid-template-rows: 1fr;
+  }
+}
+@keyframes pixel-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.07;
+  }
+  25% {
+    opacity: 0.55;
+  }
+}
+@keyframes shimmer-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.anim-fade-in {
+  animation: fade-in 350ms ease-out both;
+}
+.anim-fade-up {
+  animation: fade-up 300ms var(--ease-glide) calc(var(--i, 0) * 70ms) both;
+}
+.anim-pop-in {
+  animation: pop-in 260ms var(--ease-pop) calc(var(--i, 0) * 80ms) both;
+}
+.anim-open {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: open-row 400ms var(--ease-glide) both;
+}
+.anim-open > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 点阵等待（Loading State）：3×3 的 4px 方点，按「V」字序错开 90ms，周期 650ms。
+   它只表示「在跑」，不表示进度 —— 本机拿不到步数，所以配一个真实计时读数，不画假进度条。 */
+.pixel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 4px);
+  gap: 1.5px;
+  flex: none;
+}
+.pixel-grid i {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.15;
+  animation: pixel-dot 650ms ease-in-out var(--d, 0ms) infinite;
+}
+
+/* 等待中的那句说明：字色不变，让一道高光从左往右扫 —— 规格的 shimmer-text */
+.shimmer-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-ink-mute) 35%,
+    var(--color-ink) 50%,
+    var(--color-ink-mute) 65%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-sweep 1.4s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -229,6 +350,17 @@ body {
   }
   .stripe::after {
     opacity: 0.9; /* 静止也能认出是「在跑」：靠条纹图形本身 */
+  }
+  /* 点阵与高光靠无限循环活着，被压成 0.001ms 会停在淡出帧（等于看不见）——
+     这里显式改成一个静止但可读的状态：点阵常亮，文字恢复实色。 */
+  .pixel-grid i {
+    animation: none;
+    opacity: 0.5;
+  }
+  .shimmer-text {
+    animation: none;
+    background-image: none;
+    color: var(--color-ink);
   }
 }
 

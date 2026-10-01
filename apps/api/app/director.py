@@ -386,6 +386,10 @@ def validate_storyboard(shots: list[dict[str, Any]], total_sec: float) -> list[s
             problems.append(f"第{i + 1}镜 {d:g}s 不在 H3 单次生成的 {SHOT_DURATION_MIN:.0f}–{SHOT_DURATION_MAX:.0f} 秒里")
         if not str(s.get("action") or "").strip():
             problems.append(f"第{i + 1}镜没有动作")
+        if i > 0:
+            anchor = str(s.get("continuityAnchor") or "").strip()
+            if not anchor or anchor.upper() in {"N/A", "NA", "无"}:
+                problems.append(f"第{i + 1}镜没写「接上一镜」的锚点 —— 没有锚点就是无理由跳切")
         if str(s.get("shotSize") or "").strip() and s["shotSize"] not in SHOT_SIZES:
             problems.append(f"第{i + 1}镜景别「{s['shotSize']}」不在七档里")
         if str(s.get("cameraMovement") or "").strip() and s["cameraMovement"] not in UI_CAMERA_MOVES:

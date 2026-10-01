@@ -151,12 +151,60 @@ export interface WorkflowSlot {
   rhFieldName?: string;
 }
 
+/** 工作流的一条「任务信号」：后端导入时从图上读出来的可填输入 */
+export interface WorkflowSignal {
+  name: string;
+  label: string;
+  type: "text" | "int" | "float" | "bool" | "image" | "video" | "audio";
+  addresses: string[];
+  /** 同名参数在别处也有（如图片分支的提示词），填槽时不碰它们 */
+  also?: string[];
+  required: boolean;
+  /** 一组素材位（参考图可以有 N 张） */
+  many?: boolean;
+  value?: unknown;
+  options?: string[] | null;
+  min?: number | null;
+  max?: number | null;
+}
+
+/** 本机跑不动这条工作流的原因（缺节点包 / 缺权重） */
+export interface WorkflowGap {
+  node: string;
+  class_type: string;
+  reason: string;
+  pack?: string;
+}
+
+/** 导入时对本机不可用节点的等价改写记录，逐条可审计 */
+export interface WorkflowAdaptation {
+  node: string;
+  action: string;
+  from: string;
+  to: string;
+  detail: string;
+}
+
 export interface Workflow {
   id: string;
   name: string;
   description?: string;
   tags: string[];
   family: WorkflowFamily;
+  /** 按产出判的任务种类，自动选工作流的第一层过滤 */
+  taskKind?: WorkflowFamily;
+  /** 这条能在哪种实例上跑 */
+  executesOn?: "local" | "cloud_runninghub" | "any";
+  signals?: WorkflowSignal[];
+  gaps?: WorkflowGap[];
+  adaptations?: WorkflowAdaptation[];
+  /** 指向作者机器素材的控件：使用时必须由前端重新指定，不算缺东西 */
+  pendingMedia?: string[];
+  autoSelect?: boolean;
+  priority?: number;
+  verifiedAt?: string | null;
+  nodeCount?: number;
+  slotCount?: number;
   sourceFormat: "api" | "ui";
   graph: Record<string, GraphNode>;
   slots: WorkflowSlot[];
@@ -167,6 +215,8 @@ export interface Workflow {
     pip?: string[];
     /** 只能在 RunningHub 上跑的专有节点 */
     runninghubOnly?: string[];
+    /** 图上用 ResolutionSelector 算出来的真实尺寸，参数表按它判显存 */
+    resolution?: { aspect_ratio: string; megapixels: number; width: number; height: number; mp: number } | null;
   };
   isBuiltin: boolean;
   objectInfoHash?: string | null;
@@ -197,7 +247,8 @@ export type JobKind =
   | "upscale"
   | "detect_shots"
   | "assemble"
-  | "workflow_test";
+  | "workflow_test"
+  | "audio";
 
 export interface JobProgress {
   value?: number;
@@ -220,6 +271,9 @@ export interface Job {
   instanceId?: string | null;
   llmBackendId?: string | null;
   workflowId?: string | null;
+  /** 后端按任务自动选中的那条工作流：用户要能看出「用的哪条、凭什么是它」 */
+  workflowName?: string | null;
+  chosenBy?: string | null;
   promptId?: string | null;
   progress: JobProgress;
   queuePos?: number | null;
@@ -276,6 +330,78 @@ export interface Media {
   promptId?: string | null;
   seed?: number | null;
   createdAt: string;
+  /** 下面几个只在 /api/media-versions 与 /api/trash 上有值：/api/media 给的是"活行"，没有版本概念 */
+  version?: number | null;
+  versionCount?: number | null;
+  /** 软删（进了生成回收站）的时刻。有值就意味着取 blob 必须带 ?trashed=1 */
+  deletedAt?: string | null;
+  purgeAfter?: string | null;
+  daysLeft?: number | null;
+  /** 这条按哪条保留期算的回收时间。后端把它和 purgeAfter 一起给，界面不许自己写死 100 */
+  retentionDays?: number | null;
+  /** 后端从 job.title 带回来的人类可读名（「定妆 · 林溪」「镜 3 首帧」） */
+  title?: string | null;
+}
+
+/** 版本历史的三个分类，也就是生成历史页的那三个 tab */
+export type VersionBucket = "script" | "image" | "video";
+
+export type ScriptVersionSource = "ai-write" | "storyboard" | "manual";
+
+/** 一版剧本正文。服务端真源是 script_versions 表 */
+export interface ScriptVersionRow {
+  id: string;
+  uuid: string;
+  projectKey: string;
+  version: number;
+  versionCount: number;
+  source: ScriptVersionSource;
+  text: string;
+  /** 拆解结果快照。纯续写没有，所以是空对象而不是 null */
+  snapshot: { script?: ScriptData; characters?: Character[]; scenes?: Scene[]; shots?: Shot[] };
+  isCurrent: boolean;
+  deletedAt: string | null;
+  /** 入库时间（审计）。显示一律用 writtenAt */
+  createdAt: string;
+  /** 这版正文「何时写就」。补存的 V1 用的是编辑器上次保存的时间，不是生成时间 */
+  writtenAt: string;
+  /** createdAt 明显晚于 writtenAt ⇒ 这是补档，界面要标出来，别让它冒充生成产物 */
+  backfilled: boolean;
+  purgeAfter: string | null;
+  daysLeft: number | null;
+  retentionDays: number | null;
+}
+
+/** 生成回收站里的一条（媒体版本或剧本版本混在一张表里） */
+export interface TrashItem {
+  key: string;
+  kind: "media" | "script";
+  bucket: VersionBucket;
+  id: string;
+  uuid: string;
+  projectKey: string | null;
+  projectName?: string | null;
+  role: string | null;
+  refId: string | null;
+  title: string | null;
+  version: number;
+  versionCount: number;
+  bytes: number | null;
+  url: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+  writtenAt?: string | null;
+  purgeAfter: string | null;
+  daysLeft: number | null;
+  retentionDays: number | null;
+  media?: Media;
+  textPreview?: string | null;
+}
+
+export interface TrashList {
+  retentionDays: number;
+  totalBytes: number;
+  items: TrashItem[];
 }
 
 /* ───────── 项目 ───────── */
@@ -336,6 +462,12 @@ export interface ProjectData {
   scenes: Scene[];
   shots: Shot[];
   renderLogs: RenderLog[];
+  /** 剧本页悬浮助手的会话历史。留在项目里才能跟着导出导入走（A 方案） */
+  scriptChats?: ScriptChatSession[];
+  /** 当前正文对应服务端哪一版（script_versions.uuid）。手改之后它和那版的 text 不再相等，界面才说得出「本地已改，未存版」 */
+  scriptVersionUuid?: string | null;
+  /** 这版正文实际写就的时间。补存的 V1 靠它显示，拿入库时间冒充生成时间是另一种撒谎 */
+  scriptWrittenAt?: string | null;
   /** 任务进行中的步骤描述：切页/刷新后能恢复「正在拆解第 2/3 场」这种提示 */
   taskStep?: string;
   taskError?: string;
@@ -352,6 +484,57 @@ export interface ScriptData {
   beats: { text: string; sceneName?: string }[];
   /** 按叙事顺序的故事段落，拍摄清单的「故事梗概」用它 */
   storyParagraphs?: { id: number; text: string; sceneRefId?: string }[];
+}
+
+/**
+ * 剧本页悬浮助手的一轮对话。
+ *
+ * assistant 消息可能带一份完整改稿（scriptText）。它**不**自动进编辑器 ——
+ * 整篇替换是不可逆的，必须等人在预览上点确认。
+ */
+export interface ScriptChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  /** user 这轮是创作者的指令；assistant 这轮是模型那句「改了什么」 */
+  text: string;
+  ts: string;
+  latencyMs?: number;
+  /** 模型回吐的完整正文。为空表示这轮只是问答 */
+  scriptText?: string;
+  /** 生成这条回复时编辑器正文的字数。写回前用它判断中间有没有人手改过 */
+  baseChars?: number;
+  outcome?: "applied" | "discarded";
+  error?: string;
+  /** 后端对这次回复的结构化自检（例如「只回了被改的那一段」） */
+  warnings?: string[];
+  /**
+   * 上传解析出来的换稿提案。和 scriptText 一样：**确认前绝不进编辑器** ——
+   * 读出来的东西可能是另一部戏，自动覆盖就是拿别人的稿子盖掉用户正在写的。
+   * 存进会话是为了刷新/换页之后这份提案还在，不用重传一遍。
+   */
+  upload?: ParsedScript;
+}
+
+export interface ScriptChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ScriptChatMessage[];
+}
+
+/** /api/parse-script 的返回：一份读出来的稿子，还没进编辑器 */
+export interface ParsedScript {
+  name: string;
+  format: string;
+  encoding: string | null;
+  chars: number;
+  lines: number;
+  text: string;
+  /** 后端如实报的取舍：只抽了正文、超过模型单次上限要分段改…… */
+  notes: string[];
+  overModelCap: boolean;
+  modelCap: number;
 }
 
 /** 四类生成对象的统一状态。generating 却没有产物 = failed，见 localStores.reconcileShots */
@@ -447,6 +630,13 @@ export interface Shot {
   jobId?: string | null;
   /** 续拍：本段用上一段尾帧作引导 */
   continuesPrevious: boolean;
+  /**
+   * 跨镜衔接锚点：本镜从上一镜接住什么（动作方向 / 视线目标 / 同一道光 / 同一个道具 /
+   * 同一种轮廓 / 同一段声音 / 同一股受力）。这是**文字接续**，和 continuesPrevious 的
+   * 尾帧接续是两条独立机制：勾了续拍也照样要写锚点，因为接的不只是画面，还有动机。
+   * 首镜写 N/A 或留空。
+   */
+  continuityAnchor?: string;
   /** AI 拆分镜头产生的子镜：'shot-1-2'，父镜 id 是 'shot-1' */
   parentShotId?: string | null;
 }
@@ -481,6 +671,11 @@ export interface H3Prompt {
   sceneDescription?: string;
   /** wenwu：逐镜定时块原文，每条形如「镜头1（0-3s）：…」 */
   shotBlocks?: string[];
+  /**
+   * 这一镜是模型在何时重写的。项目换提示词模式时要靠它把 AI 稿和模板稿分开：
+   * 本地模板重拼会把六段式的导演级内容降级成一句话，不能让一次点击悄悄吃掉几分钟显存换来的稿子。
+   */
+  aiRewrittenAt?: string;
 }
 
 /** 资产库：跨项目复用的角色/场景（含参考图与全部提示词） */
@@ -577,7 +772,7 @@ export interface ImportReport {
 
 /* ───────── 文本模型用途（同步返回，结果直接写进 IndexedDB 的项目） ───────── */
 
-export type LlmPurpose = "script_parse" | "storyboard" | "visualize" | "h3_prompt" | "script_write";
+export type LlmPurpose = "script_parse" | "storyboard" | "visualize" | "h3_prompt" | "script_write" | "script_chat";
 
 export interface LlmRunResult<T = unknown> {
   purpose: LlmPurpose;
@@ -602,4 +797,6 @@ export interface LlmShot {
   durationSec: number;
   cameraMovement: string;
   shotSize: string;
+  /** 接住上一镜的锚点，首镜 N/A。后端 storyboard 必填，老后端可能不给 */
+  continuityAnchor?: string;
 }

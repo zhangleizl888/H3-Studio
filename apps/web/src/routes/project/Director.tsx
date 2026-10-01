@@ -10,9 +10,9 @@ import type { GenTarget } from "../../lib/generate";
 import type { GenerateRequest, JobPlanResult } from "../../lib/api";
 import { useGenerator } from "../../lib/useGenerate";
 import { flushSaves } from "../../lib/localStores";
-import type { JobState, LlmShot, Media, Project, Shot } from "../../lib/types";
+import type { JobState, LlmShot, Project, Shot } from "../../lib/types";
 import { cn } from "../../lib/utils";
-import { aspectOf, cardLabel, frameMediaId, machVar, useMediaSrc, type DirectorCtx } from "./director/common";
+import { aspectOf, cardLabel, frameMediaId, ImagePreview, machVar, VideoPreview, type DirectorCtx } from "./director/common";
 import { PlanTable } from "./director/PlanTable";
 import { ShotCard } from "./director/ShotCard";
 import { ShotDrawer } from "./director/ShotDrawer";
@@ -399,18 +399,4 @@ export default function Director() {
 /** Job 的 dispatching 在 StateKey 里归到 running */
 function asStateKey(s: JobState): StateKey {
   return s === "dispatching" ? "running" : s;
-}
-
-function ImagePreview({ media }: { media: Media | undefined }) {
-  const src = useMediaSrc(media);
-  if (!media) return <p className="py-8 text-center text-note text-ink-mute">这条记录在本地索引里找不到，可能项目是在别的机器上出的片。</p>;
-  if (!src) return <p className="py-8 text-center text-note text-ink-mute">这个文件还读不回来：检查产出它的实例是否还在，或后端是否起着。</p>;
-  return <img src={src} alt="关键帧预览" className="mx-auto max-h-[62vh] w-auto rounded-ctl border border-rule-soft" />;
-}
-
-function VideoPreview({ media }: { media: Media | undefined }) {
-  const src = useMediaSrc(media);
-  if (!media) return <p className="py-8 text-center text-note text-ink-mute">这段成片在本地索引里找不到记录。</p>;
-  if (!src) return <p className="py-8 text-center text-note text-ink-mute">这个文件还读不回来：产物可能已被清理，或后端没起着。</p>;
-  return <video src={src} controls autoPlay playsInline className="max-h-[62vh] w-full rounded-ctl border border-rule-soft bg-void" />;
 }

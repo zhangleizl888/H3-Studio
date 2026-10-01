@@ -299,6 +299,20 @@ def _trailing_defaultable(info: NodeInfo, widget_order: list[str], shortfall: in
 _UI_ONLY_TYPES = {"markdownnote", "note", "notetext"}
 
 
+def _ui_consumers(nodes: list[dict[str, Any]], links: dict[Any, Any], node_id: int) -> list[tuple[str, str]]:
+    """画布里所有引用了某个节点输出的下游连线，返回 [(下游节点 id, 输入名)]。"""
+    out: list[tuple[str, str]] = []
+    for other in nodes:
+        if str(other.get("id")) == str(node_id):
+            continue
+        for socket in other.get("inputs") or []:
+            lid = socket.get("link")
+            src = links.get(lid) if lid is not None else None
+            if src and str(src[0]) == str(node_id) and socket.get("name"):
+                out.append((str(other["id"]), str(socket["name"])))
+    return out
+
+
 def _is_ui_only_node(class_type: Any) -> bool:
     return isinstance(class_type, str) and class_type.lower() in _UI_ONLY_TYPES
 
@@ -326,6 +340,7 @@ def ui_to_api(ui_graph: dict[str, Any], object_info: dict[str, Any], *, report: 
 
     overrides = ui_graph.get("_subgraph_overrides") or {}
     graph: dict[str, Any] = {}
+    dropped_ids: set[str] = set()   # 被静音/旁路丢掉的节点，下游再引用就等于断线
     for node in nodes:
         node_id = str(node["id"])
         overrides_for_node = overrides.get(node_id)
@@ -358,12 +373,25 @@ def ui_to_api(ui_graph: dict[str, Any], object_info: dict[str, Any], *, report: 
         mode = node.get("mode", 0)
         if mode in (2, 4):
             # 只把第一个输入原样透传出去；拿不到就报错，避免静默改变语义
+            # 透传目标：静音/旁路节点如果有任何一条入线，就把那条线原样递出去；
+            # 一条入线都没有（例如被关掉的 LoadImage），它就没有可透传的东西 —— 按 litegraph
+            # 的语义丢掉节点本身，并把「哪几个下游输入因此退回默认值」报出来。
             first_input = next((i for i in node.get("inputs") or [] if i.get("link") is not None), None)
-            if first_input is None:
-                raise ConversionError(f"节点被静默/旁路（mode={mode}）但没有连线，无法确定透传哪一路", node_id=node_id, class_type=class_type)
-            src = links.get(first_input["link"])
+            src = links.get(first_input["link"]) if first_input else None
+            if src is not None and str(src[0]) in dropped_ids:
+                # 上游那一节点本身也被静音掉了：整条静音链一起断，同样逐条报出来
+                src = None
             if src is None:
-                raise ConversionError(f"节点 mode={mode} 但引用的 link 不存在", node_id=node_id, class_type=class_type)
+                # litegraph 里静音/旁路 = 这个节点不参与执行，引用它输出的那条线也一并断开，
+                # 下游退回自己的控件默认值。以前这里直接报错，等于把「作者关掉的那一路」当成
+                # 结构损坏；现在按语义丢掉，并把断开点逐个报出来（不静默）。
+                dropped = [f"{c[0]}.{c[1]}" for c in _ui_consumers(nodes, links, node_id)]
+                dropped_ids.add(node_id)
+                for c in dropped:
+                    warnings.append(f"节点 {node_id}（{class_type}）被静音/旁路，下游 {c} 断开后退回它自己的控件默认值")
+                if not dropped and first_input is None:
+                    warnings.append(f"节点 {node_id}（{class_type}）被静音/旁路，没有任何下游引用，直接丢弃")
+                continue
             graph[node_id] = {"class_type": class_type, "inputs": {**inputs, info.input_order[0]: [src[0], src[1]]}, "_meta": {"title": _title(node, class_type)}}
             continue
 
@@ -455,6 +483,12 @@ def ui_to_api(ui_graph: dict[str, Any], object_info: dict[str, Any], *, report: 
         for name, value in zip(widget_order, values):
             if name in control_flags:
                 continue  # control_after_generate 是纯前端控件，API 里没有这个输入
+            if name in inputs:
+                # 这个控件在 UI 里被上游连线接管了（STRING/INT 这类控件被提升成 socket 时，
+                # litegraph 仍然把它旧值留在 widgets_values 里）。连线优先，旧值必须丢掉 ——
+                # 本机实测：加速版 H3 图文生视频把 CR Prompt Text 接到 MiniMaxH3ImageToVideo.prompt，
+                # 用控件旧值覆盖上去就是「提示词丢空、跑出来一部和白片一样的片子」，还不报错。
+                continue
             if isinstance(value, dict) and value.get("removed"):
                 continue
             if value is None:
@@ -527,18 +561,30 @@ def ui_to_api(ui_graph: dict[str, Any], object_info: dict[str, Any], *, report: 
         for input_name, value in patch.items():
             graph[node_id]["inputs"][input_name] = value
 
-    _assert_links_exist(graph)
+    _assert_links_exist(graph, dropped=dropped_ids, report=warnings)
     if report is not None:
         report.extend(warnings)
     return graph
 
 
-def _assert_links_exist(graph: dict[str, Any]) -> None:
+def _assert_links_exist(graph: dict[str, Any], *, dropped: set[str] | None = None,
+                        report: list[str] | None = None) -> None:
+    """连线必须落在图里的节点上。
+
+    指向「被静音/旁路而丢弃」的节点不算损坏：那条线本来就是断的，删掉输入让下游退回
+    控件默认值即可（并且要报出来）。剩下的悬空一律报错 —— 那才是真的丢连线。
+    """
     for node_id, node in graph.items():
-        for name, value in node["inputs"].items():
+        for name, value in list(node["inputs"].items()):
             if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str) and isinstance(value[1], int):
-                if value[0] not in graph:
-                    raise ConversionError(f"节点 {node_id} 的输入 {name} 指向不存在的节点 {value[0]}")
+                if value[0] in graph:
+                    continue
+                if dropped and value[0] in dropped:
+                    del node["inputs"][name]
+                    if report is not None:
+                        report.append(f"节点 {node_id} 的输入 {name} 原本连到被静音/旁路的 #{value[0]}，已断开并退回控件默认值")
+                    continue
+                raise ConversionError(f"节点 {node_id} 的输入 {name} 指向不存在的节点 {value[0]}")
 
 
 def api_to_ui(api_graph: dict[str, Any], object_info: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -677,6 +723,22 @@ class Slot:
     step: float | None = None
     options: list[str] | None = None
     rh_field_name: str | None = None  # RunningHub nodeInfoList 用的 fieldName
+
+    def as_dict(self) -> dict[str, Any]:
+        """路由与库里的 slots 都用这个形状（前端 types.ts 按它渲染）。"""
+        return {
+            "address": self.address,
+            "name": self.name,
+            "type": self.type,
+            "default": self.default,
+            "widget": self.widget,
+            "required": self.required,
+            "min": self.min,
+            "max": self.max,
+            "step": self.step,
+            "options": self.options,
+            "rhFieldName": self.rh_field_name,
+        }
 
 
 def extract_slots(api_graph: dict[str, Any], object_info: dict[str, Any]) -> list[Slot]:

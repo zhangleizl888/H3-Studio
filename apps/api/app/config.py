@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     # 单卡仲裁：本地实例开跑前先把文本模型进程让开（见 gpu_arbiter 的实测依据）
     gpu_arbiter: bool = True
 
+    # 生成回收站：软删到的版本满这么多天才真删文件。100 天是留给用户反悔的，
+    # 但 F 盘只剩 ~494 GB（总 4.8T 已用 90%），所以到期必须自动兑现，不能等人手动清。
+    trash_retention_days: int = 100
+    trash_purge_interval_s: int = 6 * 3600
+    # 单次扫描上限：首趟可能积压几万行，不限会把停止流程卡住
+    trash_purge_limit: int = 500
+
     def resolved_jwt_secret(self) -> str:
         if self.jwt_secret:
             if len(self.jwt_secret.encode()) < 32:

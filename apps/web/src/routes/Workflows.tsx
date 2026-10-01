@@ -23,6 +23,7 @@ import { useApi } from "../lib/apiClient";
 import { useInstances, useJobMutations, useJobs, useWorkflow, useWorkflowMutations, useWorkflows } from "../lib/hooks";
 import type { GenInstance, ImportReport, Job, NodeOverride, Workflow, WorkflowFamily, WorkflowSlot } from "../lib/types";
 import { cn, fmtMoney, fmtTime } from "../lib/utils";
+import { SplitHandle, usePane } from "../components/SplitPane";
 
 /**
  * /workflows —— 工作流库。
@@ -30,7 +31,7 @@ import { cn, fmtMoney, fmtTime } from "../lib/utils";
  * rh_task 用 nodeInfoList 投影。这一页把两个形状都摊开给人看。
  */
 
-type TabKey = "slots" | "test" | "rh" | "export";
+type TabKey = "slots" | "adapt" | "test" | "rh" | "export";
 
 const FAMILY_LABEL: Record<WorkflowFamily, string> = {
   image: "图像",
@@ -41,6 +42,7 @@ const FAMILY_LABEL: Record<WorkflowFamily, string> = {
 };
 
 export default function Workflows() {
+  const pane = usePane("workflows.list", 290, 220, 520);
   const { data: list, error: listErr } = useWorkflows();
   const [picked, setPicked] = useState<string | null>(null);
   const wfId = picked ?? list?.[0]?.id ?? null;
@@ -51,14 +53,17 @@ export default function Workflows() {
   const rhOnly = (wf?.requirements?.runninghubOnly?.length ?? 0) > 0;
 
   return (
-    <div className="grid gap-4 p-4 xl:grid-cols-[290px_minmax(0,1fr)]">
-      <WorkflowList
-        items={list}
-        error={listErr?.message ?? null}
-        selected={wfId}
-        onSelect={setPicked}
-        instances={instances ?? []}
-      />
+    <div style={pane.style} className="grid gap-4 p-4 xl:grid-cols-[var(--pane-w)_minmax(0,1fr)]">
+      <div className="relative min-w-0">
+        <WorkflowList
+          items={list}
+          error={listErr?.message ?? null}
+          selected={wfId}
+          onSelect={setPicked}
+          instances={instances ?? []}
+        />
+        <SplitHandle pane={pane} side="left" label="工作流列表宽度" className="hidden xl:block" />
+      </div>
 
       {!wf ? (
         <Panel title="工作流">
@@ -133,6 +138,9 @@ function WorkflowList({
                   <div className="flex flex-wrap items-center gap-1">
                     <Badge>{w.isBuiltin ? "内置" : "导入"}</Badge>
                     <Badge>{w.sourceFormat === "api" ? "API 格式" : "UI 格式"}</Badge>
+                    {(w.gaps?.length ?? 0) > 0 ? <Badge tone="warn">本机缺 {w.gaps!.length} 处</Badge> : <Badge tone="ok">本机节点齐</Badge>}
+                    {w.verifiedAt && <Badge tone="ok">真机跑通过</Badge>}
+                    {w.autoSelect === false && <Badge>不参与自动选</Badge>}
                     {only && <Badge tone="warn">仅 RunningHub</Badge>}
                     {w.tags.map((t) => (
                       <span key={t} className="rounded-panel bg-slate px-1.5 py-[1px] text-caption text-ink-mute">
@@ -141,7 +149,11 @@ function WorkflowList({
                     ))}
                   </div>
                   <div className="flex items-center justify-between gap-2 text-caption text-ink-mute">
-                    <span className="mono">{w.slots?.length ?? 0} 个槽位</span>
+                    <span className="mono">
+                      {(w.signals?.length ?? 0) > 0 ? `吃 ${(w.signals ?? []).slice(0, 3).map((x) => x.label).join("/")}… · ` : ""}
+                      {w.nodeCount ? `${w.nodeCount} 节点 · ` : ""}
+                      {w.slots?.length ?? 0} 槽位
+                    </span>
                     <span>{fmtTime(w.updatedAt)}</span>
                   </div>
                 </button>
@@ -217,7 +229,29 @@ function Inspector({
   const [raws, setRaws] = useState<Record<string, string>>({});
 
   const slots = wf.slots ?? [];
+  const wfMut = useWorkflowMutations();
+  const [scanMsg, setScanMsg] = useState("");
   const typed = useMemo(() => typedValues(slots, raws), [slots, raws]);
+
+  /** 重扫 = 后端从 graph_original 重改写一遍；装了缺的节点包之后必须点它 */
+  function rescan(w: Workflow) {
+    setScanMsg("正在按实例的 /object_info 重改写…");
+    wfMut.rescan.mutate({ id: w.id }, {
+      onSuccess: (res) => {
+        const rep = res.report as unknown as { gaps?: unknown[]; adaptations?: unknown[] };
+        setScanMsg(`重扫完成：改写 ${(rep.adaptations ?? []).length} 处、还缺 ${(rep.gaps ?? []).length} 处`);
+      },
+      onError: (e) => setScanMsg(`重扫失败：${(e as Error).message}`.slice(0, 180)),
+    });
+  }
+
+  function toggleAuto(w: Workflow) {
+    const next = w.autoSelect === false;
+    wfMut.patch.mutate({ id: w.id, body: { autoSelect: next } }, {
+      onSuccess: () => setScanMsg(next ? "已允许参与自动选" : "已禁止参与自动选"),
+      onError: (e) => setScanMsg(`改失败：${(e as Error).message}`.slice(0, 180)),
+    });
+  }
   const patch = useMemo(() => apiPatch(slots, raws), [slots, raws]);
   const changed = Object.keys(raws).filter((k) => raws[k] !== "").length;
 
@@ -232,6 +266,10 @@ function Inspector({
             <Badge>{FAMILY_LABEL[wf.family]}</Badge>
             <Badge>{wf.isBuiltin ? "内置" : "导入"}</Badge>
             <Badge>源格式 {wf.sourceFormat}</Badge>
+            <Badge>{wf.executesOn === "cloud_runninghub" ? "只能云端跑" : wf.executesOn === "local" ? "本机跑" : "本机与云端都能跑"}</Badge>
+            {(wf.gaps?.length ?? 0) > 0 ? <Badge tone="warn">本机缺 {wf.gaps!.length} 处</Badge> : <Badge tone="ok">本机节点齐</Badge>}
+            {!!(wf.adaptations?.length ?? 0) && <Badge>改写 {wf.adaptations!.length} 处</Badge>}
+            {wf.verifiedAt ? <Badge tone="ok">真机跑通过</Badge> : <Badge tone="warn">还没跑过</Badge>}
             {rhOnly && <Badge tone="warn">只能跑在 RunningHub 实例上</Badge>}
           </div>
           {wf.description && <p className="text-note leading-relaxed text-ink-dim">{wf.description}</p>}
@@ -252,6 +290,22 @@ function Inspector({
             </p>
           )}
           <SlotRequirements wf={wf} />
+          {!wf.isBuiltin && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="quiet" onClick={() => rescan(wf)} disabled={wfMut.rescan.isPending}>
+                重新扫描（按实例现在的节点与权重重改写）
+              </Button>
+              <Button
+                size="sm"
+                variant="quiet"
+                onClick={() => toggleAuto(wf)}
+                title="关掉后这条只认手动指定，不会被「按任务自动选」挑中"
+              >
+                {wf.autoSelect === false ? "允许参与自动选" : "禁止参与自动选"}
+              </Button>
+              {scanMsg && <span className="text-caption text-ink-mute">{scanMsg}</span>}
+            </div>
+          )}
         </div>
       </Panel>
 
@@ -262,6 +316,11 @@ function Inspector({
           onChange={setTab}
           tabs={[
             { key: "slots", label: "槽位", badge: <span className="mono text-caption text-ink-mute">{slots.length}</span> },
+            {
+              key: "adapt",
+              label: "任务信号与本机改写",
+              badge: <span className="mono text-caption text-ink-mute">{(wf.signals?.length ?? 0) + (wf.adaptations?.length ?? 0)}</span>,
+            },
             { key: "test", label: "试运行" },
             { key: "rh", label: "RunningHub 投影", badge: rhOnly ? <Badge tone="warn">必需</Badge> : undefined },
             { key: "export", label: "导出" },
@@ -279,11 +338,93 @@ function Inspector({
               typed={typed}
             />
           )}
+          {tab === "adapt" && <AdaptTab wf={wf} />}
           {tab === "test" && <TestTab wf={wf} slots={slots} raws={raws} setRaws={setRaws} instances={instances} rhOnly={rhOnly} />}
           {tab === "rh" && <RhTab wf={wf} slots={slots} typed={typed} changed={changed} raws={raws} setRaws={setRaws} rhOnly={rhOnly} />}
           {tab === "export" && <ExportTab wf={wf} />}
         </div>
       </Panel>
+    </div>
+  );
+}
+
+/**
+ * 「任务信号 / 本机改写」页签。
+ *
+ * 这两样都是导入时后端算出来的，界面只是把它们摊开：
+ * 信号说明这条工作流吃任务给的哪些东西，改写说明为了让它在这台机器上跑动我们动了哪些节点。
+ */
+function AdaptTab({ wf }: { wf: Workflow }) {
+  const signals = wf.signals ?? [];
+  const gaps = wf.gaps ?? [];
+  const adaptations = wf.adaptations ?? [];
+  return (
+    <div className="space-y-4">
+      <section className="space-y-2">
+        <p className="text-note leading-snug text-ink-mute">
+          「任务信号」是后端从图上读出来的可填输入 —— 自动选工作流就是拿这次任务给的东西跟它们对，填槽也是按这里的落点写。
+        </p>
+        {signals.length === 0 ? (
+          <Empty title="没解析出任务信号" hint="只能整图提交或手动指定；装上缺的节点包后重新扫描，信号会更全。" />
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {signals.map((sig) => (
+              <li key={sig.name} className="rounded-panel border border-rule-soft bg-sheen p-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-body font-semibold">{sig.label}</span>
+                  <span className="mono text-caption text-ink-mute">{sig.name}</span>
+                  {sig.required && <Badge tone="warn">必填</Badge>}
+                  {sig.many && <Badge>可多份</Badge>}
+                </div>
+                <p className="mono mt-1 text-caption leading-snug text-ink-mute">
+                  {sig.type} · {sig.addresses.length} 个落点：{sig.addresses.slice(0, 3).join("、")}
+                  {sig.addresses.length > 3 ? ` 等 ${sig.addresses.length} 个` : ""}
+                </p>
+                {!!sig.also?.length && <p className="mt-0.5 text-caption text-ink-mute">别处还有 {sig.also.length} 处同名参数，填槽不动它们</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {gaps.length > 0 && (
+        <section className="space-y-1.5">
+          <span className="label-mono">这台实例还缺</span>
+          <ul className="space-y-1">
+            {gaps.map((g, i) => (
+              <li key={`${g.node}-${g.class_type}-${i}`} className="rounded-panel border border-warn/40 bg-warn/5 p-2 text-note leading-snug">
+                <span className="mono text-caption text-warn">#{g.node}</span> <b>{g.class_type}</b>
+                <span className="text-ink-mute"> —— {g.reason}</span>
+                {g.pack ? <span className="text-ink-mute">（要装：{g.pack}）</span> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="space-y-1.5">
+        <span className="label-mono">导入时改写过什么（{adaptations.length} 处）</span>
+        {adaptations.length === 0 ? (
+          <p className="text-note text-ink-mute">这份图原样就能在这台实例上跑，没有替换过任何节点。</p>
+        ) : (
+          <ul className="max-h-[340px] space-y-1 overflow-y-auto pr-1">
+            {adaptations.map((a, i) => (
+              <li key={`${a.node}-${i}`} className="rounded-panel border border-rule-soft bg-slate/40 p-2 text-caption leading-snug">
+                <span className="mono text-ink-mute">#{a.node}</span> <b>{a.action}</b> <span className="mono">{a.from}</span>
+                {a.to ? <span className="mono text-chrome"> → {a.to}</span> : null}
+                <div className="text-ink-mute">{a.detail}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {!!wf.pendingMedia?.length && (
+        <p className="text-note leading-snug text-warn">
+          {wf.pendingMedia.length} 个素材位写的还是作者机器里的文件名（{wf.pendingMedia.slice(0, 3).join("、")}
+          {wf.pendingMedia.length > 3 ? "…" : ""}），派发时必须由这次任务重新给素材，没给到的位置会被整条撤掉。
+        </p>
+      )}
     </div>
   );
 }

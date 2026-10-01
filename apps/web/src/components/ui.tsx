@@ -503,3 +503,22 @@ export function Copyable({ text, children, className }: { text: string; children
     </button>
   );
 }
+
+/**
+ * 筛选小胶囊。原来长在队列页里，回收站与生成历史也要用同一颗 ——
+ * 再复制一份就是第三种 chip（第三种已经在资产库弹窗里了），所以提到控件层。
+ */
+export function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center rounded-ctl border px-2 py-[3px] text-note transition-colors",
+        active ? "border-transparent bg-ink text-slate" : "border-rule bg-raised text-ink-dim hover:text-ink",
+      )}
+    >
+      {children}
+    </button>
+  );
+}

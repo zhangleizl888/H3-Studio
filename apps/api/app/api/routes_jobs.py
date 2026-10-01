@@ -65,9 +65,10 @@ class JobCreate(CamelModel):
 
     instance_id: str | None = None
     graph: dict[str, Any] | None = None
+    # "auto" = 让工作流库按这次任务挑一条；空或内置模板名 = 走内置模板。两者都挑不出时回落。
     template: str | None = None
     slots: dict[str, Any] | None = None
-    kind: Literal["image", "video", "video_chain", "upscale", "workflow_test"] = "video"
+    kind: Literal["image", "video", "video_chain", "upscale", "workflow_test", "audio"] = "video"
     title: str | None = Field(None, max_length=200)
     project_key: str | None = Field(None, max_length=64, description="前端 IndexedDB 里的项目 id")
     workflow_id: int | None = None
@@ -102,7 +103,11 @@ async def _instance_infos(request: Request, session) -> dict[str, Any]:
 
 async def _plan_for(request: Request, session, items: list[JobCreate]) -> list[dict[str, Any]]:
     """参数表 = /jobs/plan 的返回，也是 /jobs 与 /jobs/batch 的准入门禁（同一套判断）。"""
+    from sqlalchemy import select
+
+    from ..gen.templates import TEMPLATES
     from ..job_plan import InstanceInfo, media_ids_in, plan_jobs
+    from ..models import Workflow
 
     payloads = [i.model_dump(by_alias=True, exclude_none=True) for i in items]
     infos = await _instance_infos(request, session)
@@ -114,8 +119,16 @@ async def _plan_for(request: Request, session, items: list[JobCreate]) -> list[d
             known = {int(x) for x in found}
         except Exception:
             known = None
-    out = plan_jobs(payloads, instances=infos, known_media=known)
+    # 工作流库：只有请求里真的要用（auto / workflowId）才查，纯模板路径不多跑一次 SQL
+    workflows: list[Any] = []
+    if _has_db(request) and any((i.workflow_id or (i.template in ("", "auto", None) and not i.graph)) for i in items):
+        try:
+            workflows = list((await session.execute(select(Workflow).order_by(Workflow.id))).scalars().all())
+        except Exception as exc:
+            log.warning("读工作流库失败，这次只按内置模板判：%s", redact(str(exc))[:160])
+    out = plan_jobs(payloads, instances=infos, known_media=known, workflows=workflows)
     out["instances"] = [i.as_dict() if isinstance(i, InstanceInfo) else i for i in infos.values()]
+    out["templates"] = sorted(TEMPLATES)
     return out["rows"]
 
 
@@ -153,30 +166,67 @@ def _pick_instance(request: Request, body: JobCreate) -> str:
 
 
 def _job_body_to_params(body: JobCreate) -> dict[str, Any]:
-    if not body.graph and not body.template:
-        raise _bad_request("要么给 graph（API 格式工作流图），要么给 template + slots")
-    params: dict[str, Any] = {"meta": body.meta or {}}
-    if body.template and not body.graph:
-        from ..gen.templates import TEMPLATES
+    """入队形态：直接给 graph / 给 template+slots / 给工作流（指定 id 或 auto 让库来选）。
 
-        if body.template not in TEMPLATES:
-            raise _bad_request(f"没有生成模板 {body.template}（可用：{'、'.join(TEMPLATES)}）")
-        params.update({"template": body.template, "slots": body.slots or {}})
+    auto 这条路只在这里立个标记，真正挑哪条工作流由 `_enqueue` 的参数表决定 ——
+    选择要读库、要问实例在哪儿，那些都在异步侧，不该塞进这个纯函数里。
+    """
+    params: dict[str, Any] = {"meta": body.meta or {}}
+    if body.graph:
+        params["graph"] = body.graph
+        if body.workflow_id:
+            params["workflow_id"] = body.workflow_id
         return params
-    params["graph"] = body.graph
+    if body.workflow_id:
+        params.update({"workflow_id": body.workflow_id, "slots": body.slots or {}})
+        return params
+    if (body.template or "") in ("", "auto"):
+        params.update({"auto_workflow": True, "slots": body.slots or {}})
+        return params
+    if not body.template:
+        raise _bad_request("要么给 graph（API 格式工作流图），要么给 template + slots，要么给 workflowId / template=auto")
+    from ..gen.templates import TEMPLATES
+
+    if body.template not in TEMPLATES:
+        raise _bad_request(f"没有生成模板 {body.template}（可用：{'、'.join(TEMPLATES)}）")
+    params.update({"template": body.template, "slots": body.slots or {}})
     return params
 
 
-async def _enqueue(request: Request, session, actor: Any, body: JobCreate, *, checked: bool = False) -> dict[str, Any]:
+async def _enqueue(request: Request, session, actor: Any, body: JobCreate, *, checked: bool = False,
+                   plan_row: dict[str, Any] | None = None) -> dict[str, Any]:
     from ..gen.base import GenError
 
     instance_id = _pick_instance(request, body)
     params = _job_body_to_params(body)
-    # 参数表门禁：template+slots 这条路先按 SlotSpec 校验再入队，graph 那条交给下面的 missing_models
-    if not checked and body.template and not body.graph:
+    # 参数表既是 /jobs/plan 的返回，也是这里的准入门禁；工作流那条路还负责把「auto」落成
+    # 一个具体的 workflow_id —— 只在这里选一次，队列按选好的那条去填图。
+    needs_gate = bool(params.get("template") or params.get("auto_workflow") or params.get("workflow_id"))
+    if needs_gate and plan_row is None and not checked:
         rows = await _plan_for(request, session, [body])
-        if rows and rows[0].get("blocked"):
-            raise _bad_request("参数不合格，没有入队：" + "；".join(rows[0].get("problems") or [])[:300])
+        plan_row = rows[0] if rows else None
+    if needs_gate and plan_row is not None:
+        if plan_row.get("blocked"):
+            raise _bad_request("参数不合格，没有入队：" + "；".join(plan_row.get("problems") or [])[:300])
+        derived = plan_row.get("derived") or {}
+        if params.get("auto_workflow"):
+            chosen = str(plan_row.get("template") or "")
+            params.pop("auto_workflow")
+            if chosen.startswith("workflow:"):
+                params["workflow_id"] = int(chosen.split(":", 1)[1])
+                params["chosenBy"] = derived.get("chosenBy") or "按任务自动选"
+                params["workflowName"] = derived.get("workflowName")
+            else:
+                params["template"] = chosen
+                params["chosenBy"] = derived.get("chosenBy") or "回落内置模板"
+        if params.get("workflow_id"):
+            # 填图要知道实例在哪儿：本机改写过图的工作流不该派给云端实例，反之亦然
+            params["instancePlacement"] = (plan_row.get("instance") or {}).get("placement") or "local"
+            # 显式指定 id 这条路也要写上「用了哪条、凭什么」：不写的话任务列表的
+            # 工作流名是空的，事后分不清是用户指定的还是自动挑的。
+            params.setdefault("workflowName", derived.get("workflowName"))
+            params.setdefault("chosenBy", derived.get("chosenBy") or "手动指定")
+        params.setdefault("meta", {})["planProblems"] = plan_row.get("problems") or []
     if params.get("graph"):
         try:
             client = _registry(request).client(instance_id)
@@ -204,7 +254,7 @@ async def _enqueue(request: Request, session, actor: Any, body: JobCreate, *, ch
         instance_id=instance_id,
         project_key=body.project_key,
         owner_id=getattr(actor, "id", None),
-        workflow_id=body.workflow_id,
+        workflow_id=params.get("workflow_id") or body.workflow_id,
         priority=body.priority,
     )
     await _audit_dispatch(request, session, actor, job)
@@ -231,7 +281,7 @@ async def create_jobs(body: JobBatchCreate, request: Request, actor: Any = Depen
             errors.append({"index": i, "title": item.title, "error": "；".join(row.get("problems") or ["参数不合格"])[:300]})
             continue
         try:
-            outs.append(await _enqueue(request, session, actor, item, checked=True))
+            outs.append(await _enqueue(request, session, actor, item, checked=True, plan_row=row))
         except Exception as exc:  # 逐条入队：前面几条不该因为后面一条的参数错而回滚
             detail = getattr(exc, "detail", None) or str(exc)
             errors.append({"index": i, "title": item.title, "error": str(detail)[:300]})
@@ -241,7 +291,16 @@ async def create_jobs(body: JobBatchCreate, request: Request, actor: Any = Depen
 
 def _job_out(job: Job, media_ids: list[int] | None = None) -> dict[str, Any]:
     state = job.state.value if isinstance(job.state, JS) else job.state
+    # 「用的哪条工作流、凭什么选的」必须跟着任务走：派发之后 params 才是事实来源，
+    # 界面不显示的话用户只能靠猜，事后也对不上「我明明选了自动，怎么出了别的形状」。
+    params = job.params or {}
+    fill = params.get("fill") or {}
     return {
+        "workflowName": params.get("workflowName") or fill.get("workflowName"),
+        "chosenBy": params.get("chosenBy"),
+        # 填图说明（哪张素材接到了哪个加载器、哪个分支被撤掉）是排查「出图和给的素材对不上」
+        # 时唯一有用的信息，但整张 graph 太大不能塞进列表返回，所以只把这几行话带出去。
+        "fillNotes": fill.get("fillNotes") or [],
         "id": job.uuid,
         "jobId": job.uuid,
         "promptId": job.prompt_id,
@@ -428,7 +487,7 @@ async def job_stream(
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-async def _media_file(media_id: int, request: Request) -> tuple[Path, str]:
+async def _media_file(media_id: int, request: Request, allow_trashed: bool = False) -> tuple[Path, str]:
     """按 §10 的契约读 media_root 里的产物。
 
     path 是库里的字符串，而库里的值来自实例返回的文件名 —— 目录穿越必须在读接口上挡死。
@@ -437,7 +496,11 @@ async def _media_file(media_id: int, request: Request) -> tuple[Path, str]:
         raise _bad_request("无库模式没有 media 表，产物请走 /api/instances/{id}/output")
     async with session_factory()() as s:
         row = await s.get(Media, media_id)
-    if row is None or row.deleted_at is not None:
+    if row is None:
+        raise _not_found(f"媒体 {media_id} 不存在")
+    # 回收站里的版本文件本来就还在盘上（满保留期才真删）。预览必须放行，
+    # 否则「生成回收站」点开全是 404，用户在恢复之前根本没法确认那是什么。
+    if row.deleted_at is not None and not allow_trashed:
         raise _not_found(f"媒体 {media_id} 不存在")
     root = Path(request.app.state.settings.media_root).resolve()
     target = (root / row.path).resolve()
@@ -601,7 +664,14 @@ def _media_out(m: Media) -> dict[str, Any]:
         "mime": m.mime,
         "width": m.width,
         "height": m.height,
+        # 这三个字段前端 toMedia() 一直在读，以前是被静默丢掉的：回收站的时长标签、
+        # 「这是不是静帧」的判断都靠它们
+        "fps": float(m.fps) if m.fps is not None else None,
+        "durationMs": m.duration_ms,
+        "thumbPath": m.thumb_path,
         "url": f"/api/media/{m.id}/raw",
+        # 软删标记要露出来：前端的取 blob 路径靠它决定是不是该带 ?trashed=1
+        "deletedAt": m.deleted_at.isoformat() if m.deleted_at else None,
         "createdAt": m.created_at.isoformat() if m.created_at else None,
     }
 
@@ -660,22 +730,24 @@ async def upload_media(
 
 
 @router.get("/media/{media_id}/raw")
-async def media_raw(media_id: int, request: Request, _: Any = Depends(login_gate)) -> FileResponse:
+async def media_raw(media_id: int, request: Request, trashed: bool = False, _: Any = Depends(login_gate)) -> FileResponse:
     """预览用。FileResponse 自带 Range，所以 <video> 能拖进度条。
 
     文件名可能含中文（合并成片用项目名命名），HTTP 头只能 latin-1，
     所以走 RFC 5987：给一个 ASCII 兜底 filename + 百分号编码的 filename*。
+
+    `?trashed=1` 是给生成回收站开的口子：软删的行默认读不到，但没删干净的文件得能预览。
     """
-    target, mime = await _media_file(media_id, request)
+    target, mime = await _media_file(media_id, request, allow_trashed=trashed)
     ascii_fallback = target.name.encode("ascii", "ignore").decode().replace('"', "").strip() or "media"
     disposition = f'inline; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quote(target.name)}'
     return FileResponse(target, media_type=mime, headers={"Content-Disposition": disposition})
 
 
 @router.get("/media/{media_id}/download")
-async def media_download(media_id: int, request: Request, _: Any = Depends(login_gate)) -> FileResponse:
+async def media_download(media_id: int, request: Request, trashed: bool = False, _: Any = Depends(login_gate)) -> FileResponse:
     """资产下载（阶段④）。Content-Disposition 交给 FileResponse 生成。"""
-    target, mime = await _media_file(media_id, request)
+    target, mime = await _media_file(media_id, request, allow_trashed=trashed)
     return FileResponse(target, media_type=mime, filename=target.name)
 
 

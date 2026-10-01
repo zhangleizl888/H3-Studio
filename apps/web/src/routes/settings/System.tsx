@@ -38,7 +38,7 @@ const AUDIT: { ts: string; actor: string; action: string; target: string; detail
   { ts: hoursAgo(9), actor: "张雷", action: "媒体回收预演", target: "data/tmp", detail: "报告 3.4 GB 可回收，未实际删除" },
   { ts: hoursAgo(26), actor: "王奇", action: "导出", target: "p_1", detail: "整片合成，-c copy 命中，没回退重编码" },
   { ts: hoursAgo(30), actor: "张雷", action: "登录失败", target: "zhous", detail: "密码不对，第 2 次；5 次后锁 10 分钟" },
-  { ts: hoursAgo(52), actor: "张雷", action: "项目软删除", target: "p_short", detail: "7 天后文件才走，到期前可撤销" },
+  { ts: hoursAgo(52), actor: "张雷", action: "项目移入回收站", target: "p_short", detail: "满 100 天后文件才走，到期前可在生成回收站恢复" },
 ];
 
 export default function System() {
@@ -213,7 +213,7 @@ export default function System() {
               setReport(null);
             }}
             label="只做预演"
-            hint="预演只报「能回收多少、有多少游离文件」，一个字节都不删。"
+            hint="预演只报「能回收多少、有多少孤儿行」，一个字节都不删。"
           />
 
           <div className="flex flex-wrap items-center gap-2">
@@ -246,25 +246,25 @@ export default function System() {
                 <span className="text-ink">{report.dry ? "预演结果" : "已经回收"}</span>
               </div>
               <div className="mono mt-1 text-note">
-                {report.dry ? "可回收" : "本次回收"} {fmtBytes(report.reclaimableBytes)} · 游离文件 {report.orphans} 个
+                {report.dry ? "可回收" : "本次回收"} {fmtBytes(report.reclaimableBytes)} · 孤儿行 {report.orphans} 个（有记录、没文件）
               </div>
               <p className="mt-1 text-caption leading-snug text-ink-mute">
                 {report.dry
                   ? "上面是「如果现在动手会回收多少」。关掉预演、再点一次并确认，才会真删。"
-                  : "临时切片与被新版本取代的预览图已经删掉；在用的关键帧与成片没动。"}
+                  : "到期的版本连文件一起删了，孤儿行也清了；没满保留期的和还在用的一律没动。"}
               </p>
             </div>
           )}
 
           <div className="space-y-1 rounded-ctl border border-rule-soft px-2.5 py-2 text-note leading-snug text-ink-dim">
             <p>
-              回收范围：临时切片、失败重试留下的中间帧、被更新版本取代的预览图。
-              <span className="text-ink">在用的关键帧、成片与参考图不动。</span>
+              这一条清的是<span className="text-ink">已经在生成回收站里待满保留期</span>的版本（连文件一起删），
+              外加「库里有记录、盘上已经没文件」的孤儿行。<span className="text-ink">在用的关键帧、成片与参考图不动。</span>
             </p>
             <p className="text-ink-mute">
-              产品规则在这儿说明白：项目删除是软删除，<span className="mono">7 天</span>之后文件才走。
-              这 7 天内撤销项目就能把媒体一起拉回来。跳过等待提前批量清理的端点后端还没有，
-              所以本机能做的只有清临时目录这一件事。
+              保留期 <span className="mono">100 天</span>：<span className="mono">H3_TRASH_RETENTION_DAYS</span> 可改。
+              到期回收由后端自动跑（开机一趟 + 每 6 小时一趟），不用人守着；这个按钮是"现在就跑一趟"，
+              默认预演，数字对不上就别关掉预演。
             </p>
           </div>
         </div>
@@ -485,8 +485,8 @@ function ConfirmGcModal({
     >
       <div className="space-y-3">
         <p className="text-note leading-relaxed text-ink-dim">
-          这一步会真的删文件，删掉的临时切片与被取代的预览图没有回收站。
-          在用的关键帧、成片、参考图不动；软删除未满 7 天的项目也不动。
+          这一步会真的删文件：回收站里满 <span className="mono">100 天</span>的那些版本就此没了，也再也恢复不回来。
+          在用的关键帧、成片、参考图不动；没满保留期的回收站条目也不动。
         </p>
         <p className="text-note leading-snug text-ink-mute">
           建议先跑一次预演看清范围。数字对不上就先别点。

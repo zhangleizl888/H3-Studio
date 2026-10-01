@@ -20,6 +20,20 @@ import {
   shotLabel,
 } from "./prompts";
 
+/**
+ * 出图 / 出片用哪张图：项目配置里存的可以是内置模板名、工作流库的数字 id，或 "auto"。
+ *
+ * 数字 → 显式指定库里那条（后端按它填槽，仍会先核对实例跑不跑得动）；
+ * "auto" → 让后端按这次任务的形状（有没有参考图/视频、要不要尾帧）从库里挑；
+ * 其它 → 内置模板名，保持老项目原样。
+ * 库里一条都挑不出时后端会回落内置模板，并在参数表里写明是回落 —— 前端不重复这套判断。
+ */
+export function templateFor(project: Project, family: "image" | "video"): { template: string; workflowId?: number } {
+  const raw = String((family === "image" ? project.config.imageTemplate : project.config.videoTemplate) || "auto");
+  if (/^\d+$/.test(raw)) return { template: "auto", workflowId: Number(raw) };
+  return { template: raw || "auto" };
+}
+
 /** 生成对象：一个联合标签，决定产物挂回哪里 */
 export type GenTarget =
   | { kind: "character"; characterId: string }
@@ -60,7 +74,7 @@ export function characterRequest(project: Project, char: Character): GenerateReq
   const { width, height } = imageSize(project);
   return {
     projectId: project.id,
-    template: project.config.imageTemplate,
+    ...templateFor(project, "image"),
     instanceId: project.config.imageInstanceId ?? undefined,
     kind: "image",
     title: `定妆 · ${char.name}`,
@@ -81,7 +95,7 @@ export function variationRequest(project: Project, char: Character, variation: V
   const { width, height } = imageSize(project);
   return {
     projectId: project.id,
-    template: project.config.imageTemplate,
+    ...templateFor(project, "image"),
     instanceId: project.config.imageInstanceId ?? undefined,
     kind: "image",
     title: `变体 · ${char.name} / ${variation.name}`,
@@ -101,7 +115,7 @@ export function sceneRequest(project: Project, scene: Scene): GenerateRequest {
   const { width, height } = imageSize(project);
   return {
     projectId: project.id,
-    template: project.config.imageTemplate,
+    ...templateFor(project, "image"),
     instanceId: project.config.imageInstanceId ?? undefined,
     kind: "image",
     title: `场景 · ${scene.name}`,
@@ -126,7 +140,7 @@ export function keyframeRequest(project: Project, shot: Shot, frameType: "start"
   const existing = shot.keyframes?.find((k) => k.type === frameType);
   return {
     projectId: project.id,
-    template: project.config.imageTemplate,
+    ...templateFor(project, "image"),
     instanceId: project.config.imageInstanceId ?? undefined,
     kind: "image",
     title: `${frameType === "start" ? "首帧" : "尾帧"} · 镜 ${shot.index}`,
@@ -159,14 +173,24 @@ const videoPromptOf = (s: Shot) => s.videoPrompt?.trim() || h3PromptText(s.h3Pro
 /**
  * 承接链：从本镜头往回收集连续的「承接上一镜」镜头，链头在前、本镜头是链尾。
  * 本镜头没勾承接时就只有它自己一个，出片照旧走单镜头模板。
+ * 项目级开关 continuity 关掉时一律不串链：逐镜独立出片，接缝靠画面首帧与文字锚点接续。
  */
 export function videoChainShots(project: Project, shot: Shot): Shot[] {
+  if (!project.config.continuity) return [shot];
   const ordered = [...project.data.shots].sort((a, b) => a.index - b.index);
   const at = ordered.findIndex((s) => s.id === shot.id);
   if (at < 0) return [shot];
   let head = at;
   while (head > 0 && ordered[head].continuesPrevious) head -= 1;
   return ordered.slice(head, at + 1);
+}
+
+/** 段间重叠帧：h3_chain 的 guide_frames 只认这五档，配置里填了别的就就近取一档 */
+function guideFrames(n: number | undefined): string {
+  const allowed = [5, 22, 39, 56];
+  const want = n ?? 22;
+  const hit = allowed.reduce((best, x) => (Math.abs(x - want) < Math.abs(best - want) ? x : best), allowed[0]);
+  return String(hit);
 }
 
 export function videoRequest(project: Project, shot: Shot): GenerateRequest {
@@ -198,6 +222,7 @@ export function videoRequest(project: Project, shot: Shot): GenerateRequest {
         end_frame: serverMediaIds([endFrameOf(shot)])[0],
         width,
         height,
+        guide_frames: guideFrames(project.config.continuityOverlapFrames),
         turbo,
         steps: turbo ? 8 : 25,
         seed: head.seed || undefined,
@@ -211,7 +236,7 @@ export function videoRequest(project: Project, shot: Shot): GenerateRequest {
   const refEnd = serverMediaIds([endFrameOf(shot)]);
   return {
     projectId: project.id,
-    template: project.config.videoTemplate,
+    ...templateFor(project, "video"),
     instanceId,
     kind: "video",
     title: `出片 · 镜 ${shot.index}`,

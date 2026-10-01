@@ -20,7 +20,7 @@ import { IMAGE_SIZES } from "../../lib/prompts";
 import { importAssetIntoProject, saveCharacterAsset, saveSceneAsset } from "../../lib/localStores";
 import type { AssetLibraryItem, Character, Media, Project, Scene } from "../../lib/types";
 import type { GenerateRequest } from "../../lib/api";
-import { cn, uid } from "../../lib/utils";
+import { cn, isStill, uid } from "../../lib/utils";
 import { CharacterCard } from "./assets/CharacterCard";
 import { SceneCard } from "./assets/SceneCard";
 import { WardrobeModal } from "./assets/WardrobeModal";
@@ -768,13 +768,17 @@ export default function Assets() {
 }
 
 function PreviewBody({ media, title }: { media: Media; title: string }) {
-  const src = useMediaSrc(media);
+  // 灯箱也只认静帧：喂进视频会得到破图标，而且要先下完整段
+  const still = isStill(media) ? media : undefined;
+  const src = useMediaSrc(still);
   return (
     <div className="space-y-2">
       {src ? (
         <img src={src} alt={title} className="max-h-[62vh] w-full rounded-panel border border-hairline bg-void/70 object-contain" />
       ) : (
-        <div className="grid h-64 place-items-center rounded-panel border border-hairline text-note text-ink-mute">这张图读不回来：可能只存在于原项目的媒体库里</div>
+        <div className="grid h-64 place-items-center rounded-panel border border-hairline text-note text-ink-mute">
+          {still ? "这张图读不回来：可能只存在于原项目的媒体库里" : "这条记录不是静帧，没有可显示的封面"}
+        </div>
       )}
       <div className="label-mono">
         media {media.id}

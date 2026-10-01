@@ -328,8 +328,9 @@ export const seedProject: Project = {
     visualStyle: "live-action",
     targetDurationSec: 60,
     outputLanguage: "中文",
-    imageTemplate: "qwen_image",
-    videoTemplate: "h3_video",
+    // 新项目默认让后端按任务从工作流库里挑；库里挑不出会自动回落内置模板（参数表里会写明）
+    imageTemplate: "auto",
+    videoTemplate: "auto",
     h3PromptMode: "three_field",
     enhancePrompts: false,
     imageInstanceId: "inst_rh_proxy",

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Archive, CircleHelp, Cpu, FolderPlus, Layers, Monitor, Moon, Plus, Sun } from "lucide-react";
 import { Button, Field, Input, Modal, Panel, Textarea } from "../components/ui";
+import { SplitHandle, usePane } from "../components/SplitPane";
 import ModelConfigModal from "../components/ModelConfigModal";
 import { useProjects } from "../lib/hooks";
 import { useApi } from "../lib/apiClient";
@@ -18,6 +19,7 @@ import { THEME_MODE_LABEL, useThemeCycle } from "./dashboard/useThemeCycle";
  * 产线状态（队列、实例、磁盘）压到下面当次级信息，别抢。
  */
 export default function Dashboard() {
+  const pane = usePane("dashboard.side", 286, 220, 460);
   const nav = useNavigate();
   const api = useApi();
   const { data: projects } = useProjects();
@@ -35,7 +37,8 @@ export default function Dashboard() {
     <div className="relative min-h-full px-5 py-7 text-ink xl:px-9">
       <div className="mx-auto flex max-w-[1560px] items-start gap-7">
         {/* ───────── 左：入口栏 ───────── */}
-        <aside className="sticky top-7 hidden w-[286px] flex-none lg:block">
+        <aside style={pane.style} className="sticky top-7 hidden w-[var(--pane-w)] flex-none lg:block">
+          <SplitHandle pane={pane} side="left" label="入口栏宽度" />
           <div className="glass rounded-sheet p-5 shadow-2xl shadow-black/30">
             <div className="flex items-center gap-2.5">
               <span className="grid h-8 w-8 flex-none place-items-center rounded-tile bg-gradient-to-br from-chrome to-chrome-2 text-chrome-ink">

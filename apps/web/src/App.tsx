@@ -10,6 +10,8 @@ import ProjectQueue from "./routes/project/Queue";
 import Export from "./routes/project/Export";
 import Prompts from "./routes/project/Prompts";
 import Workflows from "./routes/Workflows";
+import History from "./routes/History";
+import Trash from "./routes/Trash";
 import Instances from "./routes/settings/Instances";
 import Llm from "./routes/settings/Llm";
 import Users from "./routes/settings/Users";
@@ -68,6 +70,8 @@ export default function App() {
             <Route path="/p/:id/prompts" element={<Prompts />} />
             <Route path="/p/:id/export" element={<Export />} />
             <Route path="/workflows" element={<Workflows />} />
+            <Route path="/history" element={<History />} />
+            <Route path="/trash" element={<Trash />} />
             <Route path="/settings" element={<Navigate to="/settings/gen" replace />} />
             <Route path="/settings/gen" element={<Instances />} />
             <Route path="/settings/llm" element={<Llm />} />

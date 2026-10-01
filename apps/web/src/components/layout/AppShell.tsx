@@ -15,8 +15,11 @@ import {
   ListChecks,
   TextCursorInput,
   Waypoints,
+  History,
+  Trash2,
 } from "lucide-react";
 import { Button, MachChip, Spinner } from "../ui";
+import { SplitHandle, usePane } from "../SplitPane";
 import ModelConfigModal from "../ModelConfigModal";
 import { useInstances, useJobs, useProjects } from "../../lib/hooks";
 import { useApp } from "../../state/app";
@@ -38,6 +41,9 @@ export function AppShell() {
   const { data: projects } = useProjects();
   const { navCollapsed, setNavCollapsed, theme, toggleTheme, user, setUser } = useApp();
   const [modelConfig, setModelConfig] = useState(false);
+  const navPane = usePane("shell.nav", 236, 200, 460);
+  // 拖动期间必须关掉 transition-[width]，否则栏宽会黏在指针后面慢半拍
+  const [navDragging, setNavDragging] = useState(false);
   const api = useApi();
   const nav = useNavigate();
   const project = projects?.find((p) => p.id === id);
@@ -46,11 +52,14 @@ export function AppShell() {
     <div className="app-bg relative flex h-full min-h-screen text-ink">
       <div className="grid-overlay" aria-hidden />
       <aside
+        style={navPane.style}
         className={cn(
-          "relative z-10 flex flex-none flex-col border-r border-hairline bg-slate/70 backdrop-blur-2xl transition-[width]",
-          navCollapsed ? "w-[56px]" : "w-[236px]",
+          "relative z-10 flex flex-none flex-col border-r border-hairline bg-slate/70 backdrop-blur-2xl",
+          !navDragging && "transition-[width]",
+          navCollapsed ? "w-[56px]" : "w-[var(--pane-w)]",
         )}
       >
+        {!navCollapsed && <SplitHandle pane={navPane} side="left" label="导航栏宽度" onDragChange={setNavDragging} />}
         <div className={cn("flex h-14 items-center gap-2.5 border-b border-hairline px-4", navCollapsed && "justify-center px-0")}>
           <span className="grid h-9 w-9 flex-none place-items-center rounded-tile bg-gradient-to-br from-chrome to-chrome-2 text-chrome-ink shadow-lg shadow-chrome/20">
             <Layers className="h-[18px] w-[18px]" />
@@ -75,6 +84,8 @@ export function AppShell() {
           {project && !navCollapsed && <div className="my-1 border-t border-hairline" />}
           <SideLink to="/" label="仪表盘" icon={Film} collapsed={navCollapsed} active={pathname === "/"} />
           <SideLink to="/workflows" label="工作流库" icon={ScrollText} collapsed={navCollapsed} />
+          <SideLink to="/history" label="生成历史" icon={History} collapsed={navCollapsed} active={pathname.startsWith("/history")} />
+          <SideLink to="/trash" label="生成回收站" icon={Trash2} collapsed={navCollapsed} active={pathname.startsWith("/trash")} />
           <SideLink to="/settings/gen" label="设置" icon={Settings2} collapsed={navCollapsed} active={pathname.startsWith("/settings")} />
           <button
             onClick={() => setModelConfig(true)}

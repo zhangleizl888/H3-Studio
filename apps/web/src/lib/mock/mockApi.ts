@@ -1,7 +1,20 @@
-import type { Api, GenerateRequest } from "../api";
-import type { GenInstance, ImportReport, Job, LlmBackend, Media, ProbeReport, Project, User, Workflow } from "../types";
+import type { Api, GenerateRequest, MediaTrashResult } from "../api";
+import type {
+  GenInstance,
+  ImportReport,
+  Job,
+  LlmBackend,
+  Media,
+  ProbeReport,
+  Project,
+  ScriptVersionRow,
+  TrashItem,
+  User,
+  Workflow,
+} from "../types";
 import { RH_ERROR_HINTS } from "../constants";
 import { uid } from "../utils";
+import { dereference } from "../versions";
 import { seedInstances, seedJobs, seedLlmBackends, seedMedia, seedProject, seedUsers, seedWorkflows } from "./db";
 
 /**
@@ -18,6 +31,33 @@ const store = {
   projects: [structuredClone(seedProject)],
   jobs: structuredClone(seedJobs),
   users: structuredClone(seedUsers),
+  /**
+   * 剧本版本（对应服务端 script_versions）。演示模式也得能演 V1/V2 与回收站，
+   * 否则这个功能只在接了后端以后才"看起来存在"。
+   * 种子项目那份正文没有生成事件，标成 backfilled：界面会说"这是补的档，不是某次生成的产物"。
+   */
+  scriptVersions: (seedProject.data.rawScript?.trim()
+    ? [
+        {
+          id: "sv-1",
+          uuid: "sv-1",
+          projectKey: seedProject.id,
+          version: 1,
+          versionCount: 1,
+          source: "manual" as const,
+          text: seedProject.data.rawScript,
+          snapshot: {},
+          isCurrent: true,
+          deletedAt: null,
+          createdAt: seedProject.updatedAt,
+          writtenAt: seedProject.updatedAt,
+          backfilled: true,
+          purgeAfter: null,
+          daysLeft: null,
+          retentionDays: 100,
+        },
+      ]
+    : []) as ScriptVersionRow[],
   // 原型模式默认以 admin 登录，省去每次重新输密码；真实后端由服务端 session 决定
   session: structuredClone(seedUsers[0]) as User | null,
   defaults: {
@@ -30,6 +70,116 @@ const store = {
 
 const delay = (ms = 140) => new Promise((r) => setTimeout(r, ms));
 const clone = <T>(v: T): T => structuredClone(v);
+
+/* ───────── 版本号：演示模式也复现「序号永不复用」 ───────── */
+
+const RETENTION_DAYS = 100;
+const DAY_MS = 86_400_000;
+
+/** 分组口径和后端一致：(项目, kind, role, ref_id)。上传的参考图 kind 是 ref_*，天然不进版本 */
+const groupKey = (m: Media) => `${m.projectId ?? ""}|${m.kind}|${m.role ?? ""}|${m.refId ?? ""}`;
+/**
+ * 演示模式里"算不算生成产物"的口径。
+ *
+ * 不能照抄后端的 `kind IN ('image','video')`：种子数据把定妆照/场景图写成 kind=ref_image，
+ * 照抄就会让它们在回收站里隐身 —— 指针被摘掉了、列表里却找不到，用户看到的是东西丢了。
+ * 真正的区分是"上传的文件"：那些的 path 是 data:/demo:/idb:，不是库里的产物。
+ */
+const isGenerated = (m: Media) =>
+  ["image", "video", "ref_image", "ref_video"].includes(m.kind) && m.role !== "export" && !/^(data:|demo:\/\/|idb:)/.test(m.path ?? "");
+const versionById = new Map<string, number>();
+const seqByGroup = new Map<string, number>();
+
+/**
+ * 发号。行被"彻底删除"之后号不退 —— 只靠数组重排会把用过的号回收，
+ * 用户从回收站恢复出来的 V2 就不再是他记忆里的 V2。服务端用 app_settings 计数器
+ * 守这条，演示模式用一个 Map 守。
+ */
+function versionOf(m: Media): number {
+  const hit = versionById.get(m.id);
+  if (hit !== undefined) return hit;
+  const n = (seqByGroup.get(groupKey(m)) ?? 0) + 1;
+  seqByGroup.set(groupKey(m), n);
+  versionById.set(m.id, n);
+  return n;
+}
+
+// store.media 是 unshift 进来的，数组顺序不等于创建顺序，所以先按 createdAt 排一遍再发号
+[...store.media]
+  .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+  .forEach(versionOf);
+
+const purgeFields = (deletedAt: string | null) => {
+  if (!deletedAt) return { purgeAfter: null, daysLeft: null, retentionDays: null };
+  const after = new Date(new Date(deletedAt).getTime() + RETENTION_DAYS * DAY_MS).toISOString();
+  // 用 ceil：刚删完那一瞬是 99.99 天，floor 会显示「剩 99 天」，等于一天都没存住
+  return { purgeAfter: after, daysLeft: Math.max(Math.ceil((new Date(after).getTime() - Date.now()) / DAY_MS), 0), retentionDays: RETENTION_DAYS };
+};
+
+const withVersion = (m: Media): Media => ({
+  ...m,
+  version: versionOf(m),
+  versionCount: store.media.filter((x) => groupKey(x) === groupKey(m)).length,
+  ...purgeFields(m.deletedAt ?? null),
+});
+
+/** 同组里最新存活的那一版：删掉当前版时实体指针落到它身上 */
+const candidateInGroup = (m: Media): string | null => {
+  const alive = store.media.filter((x) => groupKey(x) === groupKey(m) && !x.deletedAt && x.id !== m.id);
+  return alive.length ? alive[alive.length - 1].id : null;
+};
+
+const toScriptRow = (v: ScriptVersionRow): ScriptVersionRow => ({
+  ...v,
+  versionCount: store.scriptVersions.filter((x) => x.projectKey === v.projectKey).length,
+  ...purgeFields(v.deletedAt),
+});
+
+/**
+ * 剧本发号。光看现存行的最大版本号是不够的：彻底删除（purge）会把那行从数组里抹掉，
+ * 删掉的正好是最高号时，下一版就回收了那个号 —— 和真后端用 app_settings 计数器
+ * 守的是同一条规矩，所以这里也得留一份不退的账。
+ */
+const scriptSeqHigh = new Map<string, number>();
+function nextScriptSeq(projectKey: string) {
+  const inRows = store.scriptVersions.filter((x) => x.projectKey === projectKey).reduce((m, x) => Math.max(m, x.version), 0);
+  const n = Math.max(scriptSeqHigh.get(projectKey) ?? 0, inRows) + 1;
+  scriptSeqHigh.set(projectKey, n);
+  return n;
+}
+
+/** 项目名快照：删掉项目之后服务端那条路会带上名字，回收站才说得出这一条原本属于谁 */
+const demoNames = new Map<string, string>();
+
+/**
+ * 演示模式的软删一版产物：标 deletedAt、算出该顶上的候选版、把实体指针摘掉，
+ * 返回和真后端 `DELETE /api/media/{id}` 一样的字段。
+ *
+ * 摘指针这一步不能省 —— 演示模式里"删除只标记没摘干净"和用户看到的 bug 是同一个 bug。
+ */
+async function demoTrashMedia(id: string): Promise<MediaTrashResult | null> {
+  const m = store.media.find((x) => x.id === id);
+  // 找不到、或本来就在回收站里：都没有可摘的指针，返回 null 让调用方照常清理
+  if (!m || m.deletedAt) return null;
+  m.deletedAt = new Date().toISOString();
+  const promote = candidateInGroup(m);
+  const group = store.media.filter((x) => groupKey(x) === groupKey(m));
+  const p = m.projectId ? store.projects.find((x) => x.id === m.projectId) : undefined;
+  if (p) dereference(p, id, promote);
+  return {
+    id: m.id,
+    projectKey: m.projectId ?? null,
+    kind: m.kind,
+    bucket: m.kind === "video" ? "video" : "image",
+    role: m.role ?? null,
+    refId: m.refId ?? null,
+    version: versionOf(m),
+    groupRemaining: group.filter((x) => !x.deletedAt).length,
+    promoteCandidateId: promote,
+    deletedAt: m.deletedAt,
+    ...purgeFields(m.deletedAt),
+  };
+}
 
 function findProject(id: string): Project {
   const p = store.projects.find((x) => x.id === id);
@@ -278,7 +428,7 @@ export const mockApi: Api = {
       await delay(700);
       const head = input.slice(0, 24).replace(/\s+/g, " ");
       if (purpose === "storyboard") {
-        return { purpose, latencyMs: 700, data: { shots: [1, 2, 3].map((i) => ({ index: i, sceneName: "3 号车站", characterNames: ["林晚"], action: `镜头 ${i}：${head}`, dialogue: "", visualPrompt: `雨夜车站，冷青色调，第 ${i} 镜`, durationSec: 6, cameraMovement: i === 1 ? "推近" : "固定", shotSize: i === 1 ? "中景" : "全景" })) } };
+        return { purpose, latencyMs: 700, data: { shots: [1, 2, 3].map((i) => ({ index: i, sceneName: "3 号车站", characterNames: ["林晚"], action: `镜头 ${i}：${head}`, dialogue: "", visualPrompt: `雨夜车站，冷青色调，第 ${i} 镜`, durationSec: 6, cameraMovement: i === 1 ? "推近" : "固定", shotSize: i === 1 ? "中景" : "全景", continuityAnchor: i === 1 ? "N/A" : i === 2 ? "同一股下沉的力道从伞尖接到她的肩线" : "同一段电车铃从上一镜的环境声延续进来" })) } };
       }
       if (purpose === "visualize") return { purpose, latencyMs: 700, data: { visualPrompt: `${head}；中景，低角度，湿冷反光，青灰主色`, negative: "文字水印、畸变手指" } };
       if (purpose === "h3_prompt") {
@@ -318,8 +468,20 @@ export const mockApi: Api = {
         }
         return { purpose, mode, latencyMs: 700, data: { integrated: `${head}，镜头缓慢推近`, soundscape: "雨声、远处电车铃", music: "N/A" } };
       }
-      const s = findProject(store.projects[0]?.id ?? "")?.data.script;
-      return { purpose, latencyMs: 700, data: clone(s ?? { title: head, logline: head, genre: ["悬疑"], characters: [], scenes: [], beats: [] }) };
+      if (purpose === "script_chat") {
+        // 演示模式：造一份「改了结尾」的正文出来，好让悬浮助手里的差异预览与写回链路能空跑
+        const script = opts?.script ?? "";
+        const ask = input.slice(0, 24).replace(/\s+/g, " ");
+        return {
+          purpose,
+          latencyMs: 700,
+          data: {
+            reply: `演示模式没有真调模型：已按「${ask}」在正文末尾追加一段，试试差异预览与写回。`,
+            scriptText: script ? `${script.replace(/\s+$/, "")}\n\n（演示改稿）${ask}` : `【第一幕】3 号车站-夜\n\n（演示改稿）${ask}`,
+          },
+        };
+      }
+      const s = findProject(store.projects[0]?.id ?? "")?.data.script;      return { purpose, latencyMs: 700, data: clone(s ?? { title: head, logline: head, genre: ["悬疑"], characters: [], scenes: [], beats: [] }) };
     },
     async scanLocal() {
       await delay(600);
@@ -476,6 +638,31 @@ export const mockApi: Api = {
     async testRun(id, instanceId) {
       return submitJobs([id], instanceId, "workflow_test", null)[0];
     },
+    async rescan(id) {
+      await delay(600);
+      const w = store.workflows.find((x) => x.id === id)!;
+      return { workflow: clone(w), report: { valid: true, sourceFormat: w.sourceFormat, unknownNodes: [], missingModels: [], warnings: ["原型模式不重扫，用的是上一次存下来的改写结果"] } as ImportReport };
+    },
+    async patch(id, body) {
+      await delay();
+      const w = store.workflows.find((x) => x.id === id)!;
+      Object.assign(w, body);
+      return clone(w);
+    },
+    async selectPreview(kind, slots) {
+      await delay(120);
+      const provided = Object.entries(slots).filter(([, v]) => v !== "" && v != null && (Array.isArray(v) ? v.length > 0 : true)).map(([k]) => k);
+      const candidates = store.workflows
+        .filter((w) => (w.taskKind ?? w.family) === kind)
+        .map((w) => {
+          const names = new Set((w.signals ?? []).map((sig) => sig.name));
+          const hit = provided.filter((k) => names.has(k === "refs" ? "ref_images" : k));
+          return { id: Number(w.id) || 0, name: w.name, score: hit.length * 3, reasons: ["吃任务给的：" + (hit.join("、") || "只用任务的一部分输入")], taskKind: String(w.taskKind ?? w.family), executesOn: String(w.executesOn ?? "any") };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+      return { kind, placement: "local", provided, fallbackTemplate: kind === "video" ? "h3_video" : "qwen_image", candidates };
+    },
   },
 
   projects: {
@@ -614,8 +801,176 @@ export const mockApi: Api = {
         ),
       );
     },
+    /** 移进回收站：标 deletedAt + 摘实体指针。演示模式没有真文件，所以不删数组项（那等于彻底删） */
     async remove(id) {
+      await demoTrashMedia(id);
+    },
+  },
+
+  versions: {
+    async media(filter) {
+      await delay();
+      const rows = store.media
+        .filter((m) => isGenerated(m))
+        .filter((m) => !filter.projectKey || m.projectId === filter.projectKey)
+        .filter((m) => !filter.bucket || filter.bucket === "script" || (m.kind === "video" ? "video" : "image") === filter.bucket)
+        .filter((m) => !filter.role || m.role === filter.role)
+        .filter((m) => !filter.refId || m.refId === filter.refId)
+        .filter((m) => (filter.onlyDeleted ? !!m.deletedAt : filter.includeDeleted ? true : !m.deletedAt))
+        .map(withVersion);
+      return clone(rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+    },
+    async script(projectKey, opts) {
+      await delay();
+      const rows = store.scriptVersions
+        .filter((v) => v.projectKey === projectKey)
+        .filter((v) => (opts?.includeDeleted ? true : !v.deletedAt))
+        .map(toScriptRow);
+      return clone(rows.sort((a, b) => b.version - a.version));
+    },
+    async createScript(body) {
+      await delay();
+      const now = new Date().toISOString();
+      const rowsOf = () => store.scriptVersions.filter((x) => x.projectKey === body.projectKey);
+      // 首次存版先把用户早已写好的正文补成 V1：和真后端一样，一次动作做完，不分两次提交
+      if (!rowsOf().length && body.backfillFrom?.text?.trim()) {
+        store.scriptVersions.push({
+          id: uid("sv"), uuid: uid("sv"), projectKey: body.projectKey, version: nextScriptSeq(body.projectKey), versionCount: 1,
+          source: "manual", text: body.backfillFrom.text, snapshot: {}, isCurrent: false, deletedAt: null,
+          createdAt: now, writtenAt: body.backfillFrom.writtenAt ?? now, backfilled: true,
+          purgeAfter: null, daysLeft: null, retentionDays: null,
+        });
+      }
+      const seq = nextScriptSeq(body.projectKey);
+      // 只信手动存版的时间，且只许往过去；其余一律当下 —— 和后端同一条信任规则
+      const asked = body.source === "manual" ? body.writtenAt : undefined;
+      const written = asked && new Date(asked).getTime() <= Date.now() ? asked : now;
+      if (body.setCurrent !== false) for (const x of rowsOf()) x.isCurrent = false;
+      const row: ScriptVersionRow = {
+        id: uid("sv"), uuid: uid("sv"), projectKey: body.projectKey, version: seq, versionCount: rowsOf().length + 1,
+        source: body.source, text: body.text, snapshot: body.snapshot ?? {}, isCurrent: body.setCurrent !== false,
+        deletedAt: null, createdAt: now, writtenAt: written, backfilled: false,
+        purgeAfter: null, daysLeft: null, retentionDays: null,
+      };
+      store.scriptVersions.push(row);
+      return clone(toScriptRow(row));
+    },
+    async setScriptCurrent(uuid) {
+      await delay();
+      const v = store.scriptVersions.find((x) => x.uuid === uuid);
+      if (!v) throw new Error("没有这一版剧本");
+      if (v.deletedAt) throw new Error("这一版在回收站里：先恢复，再设为当前");
+      for (const x of store.scriptVersions) if (x.projectKey === v.projectKey) x.isCurrent = false;
+      v.isCurrent = true;
+      return { current: clone(toScriptRow(v)), rawScript: v.text };
+    },
+    async trashScript(uuid) {
+      await delay();
+      const v = store.scriptVersions.find((x) => x.uuid === uuid);
+      if (!v) throw new Error("没有这一版剧本");
+      if (v.deletedAt) throw new Error("这一版已经在回收站里了");
+      const wasCurrent = v.isCurrent;
+      v.deletedAt = new Date().toISOString();
+      v.isCurrent = false;
+      let promoted: ScriptVersionRow | null = null;
+      if (wasCurrent) {
+        const alive = store.scriptVersions.filter((x) => x.projectKey === v.projectKey && !x.deletedAt);
+        promoted = alive.length ? alive.reduce((a, b) => (b.version > a.version ? b : a)) : null;
+        if (promoted) promoted.isCurrent = true;
+      }
+      return { uuid: v.uuid, wasCurrent, current: promoted ? clone(toScriptRow(promoted)) : null, deletedAt: v.deletedAt, ...purgeFields(v.deletedAt) };
+    },
+    async restoreScript(uuid) {
+      await delay();
+      const v = store.scriptVersions.find((x) => x.uuid === uuid);
+      if (!v) throw new Error("没有这一版剧本");
+      if (!v.deletedAt) throw new Error("这一版不在回收站里");
+      v.deletedAt = null;
+      const hasCurrent = store.scriptVersions.some((x) => x.projectKey === v.projectKey && x.isCurrent && !x.deletedAt);
+      let promotedToCurrent = false;
+      if (!hasCurrent) {
+        v.isCurrent = true;
+        promotedToCurrent = true;
+      }
+      return { uuid: v.uuid, promotedToCurrent, current: clone(toScriptRow(v)) };
+    },
+    async purgeScript(uuid) {
+      await delay();
+      const v = store.scriptVersions.find((x) => x.uuid === uuid);
+      if (!v) return;
+      if (!v.deletedAt) throw new Error("先在回收站里删掉它，才能彻底删除");
+      store.scriptVersions = store.scriptVersions.filter((x) => x.uuid !== uuid);
+      // 号不退：发号看的是历史最大值，不是"还剩几行"
+    },
+    async trashMedia(id) {
+      await delay();
+      return demoTrashMedia(id);
+    },
+    async restoreMedia(id) {
+      await delay();
+      const m = store.media.find((x) => x.id === id);
+      if (!m) throw new Error("媒体不存在");
+      if (!m.deletedAt) throw new Error("这一版不在回收站里");
+      m.deletedAt = null;
+    },
+    async purgeMedia(id) {
+      await delay();
+      const m = store.media.find((x) => x.id === id);
+      if (!m) return { deleted: 0, bytes: 0, orphans: 0, locked: 0, skipped: 0 };
+      if (!m.deletedAt) throw new Error("先在回收站里删掉它，才能彻底删除");
+      const bytes = m.bytes ?? 0;
       store.media = store.media.filter((x) => x.id !== id);
+      return { deleted: 1, bytes, orphans: 0, locked: 0, skipped: 0 };
+    },
+    async trashProject(projectKey, name) {
+      await delay();
+      if (name) demoNames.set(projectKey, name);
+      const ts = new Date().toISOString();
+      let mediaTrashed = 0;
+      let scriptTrashed = 0;
+      let bytes = 0;
+      for (const m of store.media.filter((x) => x.projectId === projectKey && !x.deletedAt)) {
+        m.deletedAt = ts;
+        mediaTrashed++;
+        bytes += m.bytes ?? 0;
+      }
+      for (const v of store.scriptVersions.filter((x) => x.projectKey === projectKey && !x.deletedAt)) {
+        v.deletedAt = ts;
+        v.isCurrent = false;
+        scriptTrashed++;
+      }
+      return { mediaTrashed, scriptTrashed, bytes };
+    },
+    async trash(filter) {
+      await delay();
+      const items: TrashItem[] = [];
+      for (const m of store.media.filter((x) => x.deletedAt && isGenerated(x) && (!filter.projectKey || x.projectId === filter.projectKey))) {
+        const mv = withVersion(m);
+        items.push({
+          key: `media:${m.id}`, kind: "media", bucket: m.kind === "video" ? "video" : "image",
+          id: m.id, uuid: m.id, projectKey: m.projectId ?? null,
+          projectName: m.projectId ? demoNames.get(m.projectId) ?? null : null,
+          role: m.role ?? null, refId: m.refId ?? null, title: m.title ?? null,
+          version: mv.version ?? 0, versionCount: mv.versionCount ?? 0,
+          bytes: m.bytes ?? null, url: null, deletedAt: m.deletedAt ?? null, createdAt: m.createdAt,
+          writtenAt: null, purgeAfter: mv.purgeAfter ?? null, daysLeft: mv.daysLeft ?? null,
+          retentionDays: mv.retentionDays ?? null, media: mv, textPreview: null,
+        });
+      }
+      for (const v of store.scriptVersions.filter((x) => x.deletedAt && (!filter.projectKey || x.projectKey === filter.projectKey))) {
+        const t = toScriptRow(v);
+        items.push({
+          key: `script:${v.uuid}`, kind: "script", bucket: "script", id: v.id, uuid: v.uuid,
+          projectKey: v.projectKey, projectName: demoNames.get(v.projectKey) ?? null,
+          role: null, refId: null, title: null, version: v.version, versionCount: t.versionCount,
+          bytes: v.text.length, url: null, deletedAt: v.deletedAt, createdAt: v.createdAt,
+          writtenAt: v.writtenAt, purgeAfter: t.purgeAfter, daysLeft: t.daysLeft,
+          retentionDays: t.retentionDays, textPreview: v.text.slice(0, 200),
+        });
+      }
+      const out = items.filter((i) => !filter.bucket || i.bucket === filter.bucket);
+      out.sort((a, b) => (b.deletedAt ?? "").localeCompare(a.deletedAt ?? ""));
+      return { retentionDays: RETENTION_DAYS, totalBytes: out.reduce((n, i) => n + (i.bytes ?? 0), 0), items: clone(out) };
     },
   },
 
@@ -705,6 +1060,35 @@ export const mockApi: Api = {
     async list() {
       const { VISUAL_STYLES } = await import("../constants");
       return clone(VISUAL_STYLES);
+    },
+  },
+
+  /**
+   * 演示模式没有后端，只能在浏览器里读纯文本类。.docx 要在服务端拆 zip 里的正文 XML，
+   * 这里如实拒掉并给出路（起后端 / 先另存为 .txt），不假装读得动。
+   */
+  parse: {
+    async script(file) {
+      await delay(400);
+      const ext = "." + (file.name.split(".").pop() ?? "").toLowerCase();
+      const readable = [".txt", ".text", ".md", ".markdown", ".fdx", ".fountain", ".csv", ".tsv", ".html", ".htm"];
+      if (ext === ".docx") {
+        throw new Error(`演示模式没有后端，${ext} 解不了（正文在包里的 word/document.xml，要在服务端拆 zip）。起后端，或先在 Word/WPS 里另存为 .txt 再传。`);
+      }
+      if (!readable.includes(ext)) throw new Error(`演示模式只读纯文本类（${readable.join("、")}）；${ext} 要走后端的 /api/parse-script。`);
+      const text = (await file.text()).replace(/\r\n?/g, "\n").trim();
+      if (!text) throw new Error(`从「${file.name}」里没抽出任何文字。`);
+      return {
+        name: file.name,
+        format: ext.slice(1),
+        encoding: "utf-8",
+        chars: text.length,
+        lines: text.split("\n").length,
+        text,
+        notes: ["演示模式：这份文件是在浏览器里读的，没经过后端的编码回退与清理"],
+        overModelCap: text.length > 24_000,
+        modelCap: 24_000,
+      };
     },
   },
 

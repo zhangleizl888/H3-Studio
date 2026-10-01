@@ -10,6 +10,7 @@
 
 import type { AssetLibraryItem, Character, Media, Project, Scene, Shot } from "./types";
 import { allRecords, deleteRecord, getRecord, putRecord, recordsByIndex, STORE_ASSETS, STORE_BLOBS, STORE_MEDIA, STORE_PROJECTS } from "./idb";
+import { accessToken } from "./tokens";
 import { uid } from "./utils";
 
 const SAVE_DEBOUNCE_MS = 1000;
@@ -27,8 +28,9 @@ export function defaultProjectConfig(): Project["config"] {
     llmBackendId: null,
     shotModelBackendId: null,
     shotModel: null,
-    imageTemplate: "qwen_image",
-    videoTemplate: "h3_video",
+    // 新项目默认让后端按任务从工作流库里挑；库里挑不出会自动回落内置模板（参数表里会写明）
+    imageTemplate: "auto",
+    videoTemplate: "auto",
     seedPolicy: "locked",
     resolutionMode: "preview",
     h3WorkflowKey: "h3_t2v",
@@ -51,6 +53,11 @@ function normalize(p: Project): Project {
   p.data.scenes ??= [];
   p.data.shots ??= [];
   p.data.renderLogs ??= [];
+  p.data.scriptChats ??= [];
+  // 老项目根本没有"正文对应哪一版"的概念。不补这两默认值，读回来是 undefined，
+  // 「当前正文和当前版一致吗」就永远答"不一致"，界面会一直催用户存版
+  p.data.scriptVersionUuid ??= null;
+  p.data.scriptWrittenAt ??= null;
   for (const c of p.data.characters) {
     c.variations ??= [];
     c.refMediaIds ??= [];
@@ -139,10 +146,34 @@ export async function updateProjectConfig(id: string, config: Partial<Project["c
 }
 
 export async function deleteProject(id: string): Promise<void> {
+  const p = await getRecord<Project>(STORE_PROJECTS, id);
+  // 服务端那条产物线也得有个交代：整批送进生成回收站，100 天后才真删文件。
+  // 以前这里只删浏览器索引，服务端那些文件从此没人管 —— media.deleted_at 建了列
+  // 却一直没有人写，就是因为缺这一步。失败不拦本地删除（离线也能删项目），但要吭一声。
+  try {
+    await trashProjectOnServer(id, p?.name);
+  } catch (e) {
+    console.warn("服务端没能把该项目的产物放进回收站：", e);
+  }
   const medias = await recordsByIndex<Media>(STORE_MEDIA, "projectId", id);
   await Promise.all(medias.map((m) => deleteMedia(m.id)));
   await deleteRecord(STORE_PROJECTS, id);
   forget(id);
+}
+
+/**
+ * 用裸 fetch 而不是 api 客户端：httpApi 反过来 import 了本模块，走它就是循环依赖。
+ * 没有 token（= 没登录 / 演示模式）就直接跳过，别在控制台刷一堆假失败。
+ */
+async function trashProjectOnServer(id: string, name?: string): Promise<void> {
+  const token = accessToken();
+  if (!token) return;
+  const res = await fetch(`/api/projects/${encodeURIComponent(id)}/trash`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name: name ?? null }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
 }
 
 export async function duplicateProject(id: string): Promise<Project> {
@@ -216,6 +247,9 @@ async function flushOne(p: Project): Promise<void> {
 export async function flushSaves(): Promise<void> {
   const pending = [...dirty.values()];
   dirty.clear();
+  // 定时器必须一起清掉：只清表的话，那条 timer 到点还会把这份快照再写一次，
+  // 于是「flush 之后紧跟的 mutation」刚落的字段会被它用旧副本盖回去（实测丢过会话状态）。
+  for (const { timer } of pending) window.clearTimeout(timer);
   await Promise.all(pending.map(({ project }) => putRecord(STORE_PROJECTS, project)));
 }
 
@@ -240,6 +274,11 @@ if (typeof window !== "undefined") {
 export async function listMedia(projectId: string): Promise<Media[]> {
   const rows = await recordsByIndex<Media>(STORE_MEDIA, "projectId", projectId);
   return rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** 单条媒体索引。摘指针时要先知道这条属于哪个项目 */
+export async function getMedia(id: string): Promise<Media | null> {
+  return (await getRecord<Media>(STORE_MEDIA, id)) ?? null;
 }
 
 export async function putUpload(projectId: string, file: File | Blob, role: Media["role"], refId: string | null, kind: Media["kind"]): Promise<Media> {

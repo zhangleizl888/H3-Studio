@@ -7,15 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from ..config import get_settings
 from ..db import get_session, session_factory
 from ..logging_setup import get_logger
-from ..models import Media
+from ..purge import last_purge, purge_expired
 from ..security import admin_gate, login_gate
 from ..styles import VISUAL_STYLES
 from .common import CamelModel
+from .routes_auth import _audit
+from .routes_versions import _project_names
 
 log = get_logger("api.system")
 router = APIRouter(tags=["system"])
@@ -46,7 +48,9 @@ async def storage(_: Any = Depends(login_gate), session=Depends(get_session)) ->
             text("SELECT project_key, count(*) AS n, COALESCE(sum(bytes),0) AS b FROM media WHERE deleted_at IS NULL GROUP BY project_key")
         )
     ).mappings().all()
-    names: dict[str, str] = {}
+    # 服务端不持有项目实体（A 方案），项目名只能取自删项目时留在 app_settings 里的那份快照；
+    # 没记过名字的项目如实显示 project_key
+    names = await _project_names(session)
     total_bytes = 0
     by_project = []
     for row in rows:
@@ -60,11 +64,21 @@ async def storage(_: Any = Depends(login_gate), session=Depends(get_session)) ->
             }
         )
     usage = shutil.disk_usage(str(media_root.parent if media_root.exists() else Path(".")))
+    # 回收站里积压了多少必须报出来：保留 100 天意味着这些字节还要占 100 天，
+    # 而这台机的 F 盘只剩 ~494 GB（总 4.8T 已用 90%）
+    trash = (
+        await session.execute(text("SELECT count(*) AS n, COALESCE(sum(bytes),0) AS b FROM media WHERE deleted_at IS NOT NULL"))
+    ).mappings().first()
+    trash_scripts = await session.scalar(text("SELECT count(*) FROM script_versions WHERE deleted_at IS NOT NULL"))
     return {
         "mediaBytes": _du(media_root),
         "tmpBytes": _du(Path(s.tmp_root)),
         "freeBytes": usage.free,
         "mediaCount": (await session.scalar(text("SELECT count(*) FROM media WHERE deleted_at IS NULL"))) or 0,
+        "trashCount": int(trash["n"]) + int(trash_scripts or 0),
+        "trashBytes": int(trash["b"]),
+        "retentionDays": s.trash_retention_days,
+        "lastPurge": await last_purge(),
         "byProject": sorted(by_project, key=lambda x: -x["bytes"]),
         "root": str(media_root),
     }
@@ -72,31 +86,33 @@ async def storage(_: Any = Depends(login_gate), session=Depends(get_session)) ->
 
 @router.post("/system/gc")
 async def gc(body: GcBody, actor: Any = Depends(admin_gate), session=Depends(get_session)) -> dict[str, Any]:
-    """回收：软删超过 7 天的媒体，以及库里有记录但磁盘上已不存在的孤儿行。
+    """回收：软删满保留期（默认 100 天）的版本，连文件一起清掉。
 
-    只按库里的 deleted_at 判断，绝不去猜「这个文件没人引用」——项目实体在浏览器
+    只按库里的 `deleted_at` + 天数判断，绝不去猜「这个文件没人引用」——项目实体在浏览器
     IndexedDB 里，服务端根本没有引用计数，猜的结果就是删掉用户的成片。
+
+    这条以前写着"超过 7 天"却一行天数都没筛：任何一条软删中的产物都会被立即清掉，
+    回收站的"可撤销"是假的。现在和到期自动扫共用 `purge.purge_expired`，两处口径必然一致。
     """
-    root = Path(get_settings().media_root)
-    rows = (await session.execute(select(Media).where(Media.deleted_at.isnot(None)))).scalars().all()
-    reclaimable = 0
-    orphans = 0
-    for m in rows:
-        target = (root / m.path).resolve()
-        if not target.is_relative_to(root.resolve()):
-            continue
-        if target.is_file():
-            reclaimable += target.stat().st_size
-            if not body.dry_run:
-                target.unlink(missing_ok=True)
-        else:
-            orphans += 1
-        if not body.dry_run:
-            await session.execute(text("DELETE FROM media WHERE id=:i"), {"i": m.id})
-    if not body.dry_run:
-        await session.commit()
-    log.info("媒体回收 %s：%d 字节 / %d 个孤儿行，操作人：%s", "试运行" if body.dry_run else "已执行", reclaimable, orphans, getattr(actor, "username", "-"))
-    return {"reclaimableBytes": reclaimable, "orphans": orphans, "dryRun": body.dry_run}
+    report = await purge_expired(dry_run=body.dry_run)
+    if not body.dry_run and (report["deleted"] or report["orphans"] or report["scriptsDeleted"]):
+        async with session_factory()() as s:
+            await _audit(
+                s,
+                user_id=getattr(actor, "id", None),
+                actor=getattr(actor, "username", None),
+                action="trash.gc",
+                target="trash",
+                request=None,
+                detail=report,
+            )
+            await s.commit()
+    return {
+        "retentionDays": get_settings().trash_retention_days,
+        # 沿用旧字段名，前端那一块不用跟着改口径
+        "reclaimableBytes": report["bytes"],
+        **report,
+    }
 
 
 @router.get("/system/gpu")

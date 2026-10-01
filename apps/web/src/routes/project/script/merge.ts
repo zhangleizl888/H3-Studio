@@ -258,6 +258,8 @@ export function buildShots(list: LlmShot[], characters: Character[], scenes: Sce
       h3Prompt: { integrated: "", soundscape: "", music: "" },
       state: prev?.videoMediaIds?.length ? "completed" : "idle",
       continuesPrevious: prev?.continuesPrevious ?? false,
+      // 锚点是这一镜与上一镜的关系，重生成分镜时以模型新给的为准；模型没给才沿用旧的
+      continuityAnchor: str(s.continuityAnchor) || (prev?.continuityAnchor ?? ""),
       parentShotId: prev?.parentShotId ?? null,
     };
     shot.h3Prompt = buildH3Prompt(shot, scene, chars, config);

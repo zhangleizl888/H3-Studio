@@ -19,12 +19,15 @@ from .api.routes_auth import router as auth_router
 from .api.routes_export import router as export_router
 from .api.routes_jobs import router as jobs_router
 from .api.routes_llm import router as llm_router
+from .api.routes_parse import router as parse_router
 from .api.routes_system import router as system_router
+from .api.routes_versions import router as versions_router
 from .api.routes_workflows import router as workflows_router
 from .config import get_settings
 from .gen.registry import InstanceRegistry
 from .gpu_arbiter import GpuArbiter, env_enabled
 from .logging_setup import get_logger, redact, setup_logging
+from .purge import TrashPurger
 from .queue import QueueDispatcher
 
 log = get_logger("app")
@@ -58,8 +61,11 @@ async def lifespan(app: FastAPI):
             await app.state.gpu.restore_llm()
 
     app.state.dispatcher = QueueDispatcher(app.state.registry, gpu=app.state.gpu)
+    app.state.trash = TrashPurger()
     if settings.database_url:
         await app.state.dispatcher.start()
+        # 回收站到期清理是另一个任务，不挂进派发循环（理由写在 TrashPurger 的 docstring 里）
+        await app.state.trash.start()
     log.info(
         "后端启动；实例：%s；单卡仲裁：%s",
         ", ".join(app.state.registry.ids) or "（无）",
@@ -68,6 +74,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await app.state.trash.stop()
         await app.state.dispatcher.stop()
         await app.state.registry.close()
 
@@ -77,8 +84,10 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(instances_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 app.include_router(llm_router, prefix="/api")
+app.include_router(parse_router, prefix="/api")
 app.include_router(workflows_router, prefix="/api")
 app.include_router(system_router, prefix="/api")
+app.include_router(versions_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
 
 

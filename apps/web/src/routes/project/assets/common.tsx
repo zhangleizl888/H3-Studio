@@ -9,7 +9,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, Pencil, Upload, X } from "lucide-react";
 import { Button, MediaFrame, Spinner, type StateKey } from "../../../components/ui";
 import { useApi } from "../../../lib/apiClient";
-import { cn } from "../../../lib/utils";
+import { cn, isStill } from "../../../lib/utils";
 import type { AssetState, Media } from "../../../lib/types";
 import type { GenHandle } from "../../../lib/useGenerate";
 
@@ -68,7 +68,9 @@ export function MediaImage({
   busy?: boolean;
   badge?: ReactNode;
 }) {
-  const src = useMediaSrc(media);
+  // 只有静帧能进 <img>：视频行喂进去会先被读成整段 blob，再画出一个破图标（见 lib/utils 的 isStill）
+  const still = isStill(media) ? media : undefined;
+  const src = useMediaSrc(still);
   const overlay = (
     <>
       {busy && (
@@ -86,7 +88,12 @@ export function MediaImage({
   if (!src) {
     return (
       <div className={cn("relative", className)}>
-        <MediaFrame seedText={seedText} kind={media ? "image" : "none"} aspect={aspect} label={emptyLabel ?? (media ? "这张图读不回来" : undefined)} />
+        <MediaFrame
+          seedText={seedText}
+          kind={!media ? "none" : !still ? "video" : "image"}
+          aspect={aspect}
+          label={emptyLabel ?? (!media ? undefined : still ? "这张图读不回来" : "这不是静帧，没有可显示的封面")}
+        />
         {overlay}
         {onClick && <button type="button" onClick={onClick} aria-label={`放大查看 ${alt}`} className="absolute inset-0 cursor-zoom-in rounded-panel" />}
       </div>

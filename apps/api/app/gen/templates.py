@@ -314,6 +314,7 @@ H3_CHAIN = TemplateSpec(
         _slot("steps", "步数", "int", default=8, min=4, max=50, hint="留空则按 Turbo 取 8/25"),
         _slot("seed", "种子", "int", default=0, min=0, max=2**53, hint="第 i 段用 种子+i；续跑时以存档记录的种子序列为准"),
         _slot("auto_reseed", "接缝超阈值自动重摇", "bool", default=False, hint="开着时长不可控：触发一次重摇就多整段采样时间"),
+        _slot("filename_prefix", "输出前缀", "text", default="h3/chain", hint="批量派发按链位前缀（如 项目/h3/链001-003），成片才认得出是哪条链"),
     ],
     build=_build_h3_chain,
 )

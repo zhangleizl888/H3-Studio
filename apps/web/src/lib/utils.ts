@@ -1,3 +1,5 @@
+import type { Media } from "./types";
+
 export function cn(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
 }
@@ -51,8 +53,7 @@ export function fmtFrames(sec: number): string {
   return `${sec.toFixed(1)}s`;
 }
 
-/** 相对时间只用于「最近 N 分钟」这种短窗口 */
-export function ago(iso?: string | null): string {
+/** 相对时间只用于「最近 N 分钟」这种短窗口 */export function ago(iso?: string | null): string {
   if (!iso) return "从未";
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
@@ -87,4 +88,15 @@ export function download(filename: string, text: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+/**
+ * 只有静帧能进 <img>。
+ *
+ * 后端没有缩略图端点（media 表有 thumb_path 列但没人写、也没人读），而 media.url() 要把整
+ * 个文件读成 blob 才拿得到 src —— 把视频行喂给 <img> 的结果是：下载整段视频，然后画出一个
+ * 破图标。视频格一律用首帧静帧当封面，或者如实显示为占位块。
+ */
+export function isStill(m: Media | undefined): m is Media {
+  return !!m && (m.kind === "image" || m.kind === "ref_image");
 }

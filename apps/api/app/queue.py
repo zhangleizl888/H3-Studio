@@ -46,7 +46,8 @@ CLAIM_SQL = text(
     -- 取一个属于该实例、处于 queued/dispatching 的任务。
     -- SKIP LOCKED 是关键：多个派发循环并发跑时，别的循环已锁住的行直接跳过，
     -- 不会互相等成串行，也不会抢到同一个任务。
-    SELECT j.id, j.uuid, j.kind, j.attempts, j.max_attempts, j.priority, j.params, j.title, j.instance_id, j.project_key
+    SELECT j.id, j.uuid, j.kind, j.attempts, j.max_attempts, j.priority, j.params, j.title, j.instance_id,
+           j.project_key, j.workflow_id
       FROM jobs j
       LEFT JOIN instance_locks l ON l.instance_id = j.instance_id
      WHERE j.instance_id = :instance_id
@@ -368,13 +369,58 @@ class QueueDispatcher:
 
         ctx = BuildContext(client=client, media_root=Path(get_settings().media_root))
         graph = await build_graph(ctx, params["template"], params.get("slots") or {})
+        await self._write_back_graph(job_id, graph)
+        return graph
+
+    async def _build_from_workflow(self, client: Any, params: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
+        """按工作流库里的那条填图：把任务落到它自己的输入点上。
+
+        与 _build_from_template 同一套纪律 —— 真正提交给 ComfyUI 的图必须回写进 params，
+        否则「工作流说用了 A，实际提交的是 B」这种问题查不出来。
+        """
+        from .config import get_settings
+        from .gen.templates import BuildContext
+        from .models import Workflow
+        from .workflow_select import Task, prepare
+
+        job_id = int(job["id"])
+        async with session_factory()() as s:
+            row = await s.get(Workflow, int(params["workflow_id"]))
+        if row is None:
+            raise GenError(f"任务引用的工作流 {params['workflow_id']} 不在库里了（被删了？）",
+                           kind="client_validation", retryable=False)
+        if row.gaps:
+            need = "；".join(f"{g['class_type']}" + (f"（{g['pack']}）" if g.get("pack") else "")
+                             for g in row.gaps[:3])
+            raise GenError(f"这条工作流在这台实例上还缺节点：{need}。装好节点后去工作流库点「重新扫描」。",
+                           kind="missing_nodes", retryable=False)
+        task = Task.from_params({"kind": _kind(job), "slots": params.get("slots") or {},
+                                 "instancePlacement": params.get("instancePlacement")})
+        ctx = BuildContext(client=client, media_root=Path(get_settings().media_root))
+        graph, notes = await prepare({"graph": row.graph, "signals": row.signals or [], "name": row.name},
+                                     task, ctx=ctx, filename_prefix=f"h3/job{job_id}")
+        if notes:
+            log.info("任务 %s 按工作流「%s」填图：%s", job_id, row.name, " / ".join(notes)[:400])
+        await self._write_back_graph(job_id, graph, extra={"fillNotes": notes, "workflowName": row.name})
+        return graph
+
+    async def _write_back_graph(self, job_id: int, graph: dict[str, Any],
+                                extra: dict[str, Any] | None = None) -> None:
+        """把真正提交的图（与填图说明）写回 params。
+
+        PostgreSQL 不许 `SET params = ..., params = ...` 同一列赋值两次，所以嵌套 jsonb_set，
+        一次写完两处 —— 分两条 UPDATE 也行，但那样中途失败会留下「有图没说明」的半态。
+        """
+        sets = "jsonb_set(params, '{graph}', CAST(:graph AS jsonb), true)"
+        if extra is not None:
+            sets = f"jsonb_set({sets}, '{{fill}}', CAST(:fill AS jsonb), true)"
         async with session_factory()() as s:
             await s.execute(
-                text("UPDATE jobs SET params = jsonb_set(params, '{graph}', CAST(:graph AS jsonb), true) WHERE id=:id"),
-                {"id": job_id, "graph": json.dumps(graph, ensure_ascii=False)},
+                text(f"UPDATE jobs SET params = {sets} WHERE id=:id"),
+                {"id": job_id, "graph": json.dumps(graph, ensure_ascii=False),
+                 "fill": json.dumps(extra or {}, ensure_ascii=False)},
             )
             await s.commit()
-        return graph
 
     async def _run(self, job: dict[str, Any], instance_id: str) -> None:
         from .gen.base import Submission
@@ -388,8 +434,11 @@ class QueueDispatcher:
             graph = params.get("graph")
             if not graph and params.get("template"):
                 graph = await self._build_from_template(client, params, job["id"])
+            if not graph and params.get("workflow_id"):
+                graph = await self._build_from_workflow(client, params, job)
             if not graph:
-                raise GenError("任务缺少 graph：既没有直接给图，也没有给 template", kind="client_validation")
+                raise GenError("任务缺少 graph：既没有直接给图，也没有给 template，也没有 workflow_id",
+                               kind="client_validation")
             missing = await client.missing_models(graph)
             if missing:
                 raise GenError("；".join(missing), kind="missing_models")
@@ -562,6 +611,11 @@ class QueueDispatcher:
                     ),
                     {"id": job["id"], "o": outputs or [], "c": _json(cost)},
                 )
+                if job.get("workflow_id"):
+                    # 「这条工作流在这台实例上真跑通过」是唯一能证明改写没改坏的东西，
+                    # 记在库上：自动选的时候它加分，工作流页上也显示得出来。
+                    await s.execute(text("UPDATE workflows SET verified_at=now() WHERE id=:w"),
+                                    {"w": int(job["workflow_id"])})
                 await s.commit()
                 return
 
@@ -642,6 +696,9 @@ class QueueDispatcher:
                         "filename": ref.filename,
                         "type": ref.type,
                         "node_id": ref.node_id,
+                        # 版本历史与生成回收站要能报出「这是什么的哪一版」。项目实体在浏览器
+                        # IndexedDB 里，服务端只能自带这个人类可读名，否则跨项目视图里只剩一串 refId uuid
+                        "jobTitle": job.get("title"),
                     },
                     meta={k: v for k, v in tag.items() if k not in {"role", "refId"}} or {},
                 )

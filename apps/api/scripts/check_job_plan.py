@@ -57,6 +57,15 @@ print("多实例不指明 →", multi["problems"])
 slow = jp.plan_jobs([dict(GOOD, slots={**GOOD["slots"], "steps": 24})], instances=INST, known_media={67})["rows"][0]
 print("Turbo 档给 24 步 →", slow["problems"])
 checks.append(("Turbo 档超 8 步必须提示白多花时间", any("Turbo" in p for p in slow["problems"])))
+
+CHAIN = {"template": "h3_chain", "kind": "video_chain", "title": "长片续拍", "instanceId": "1",
+         "slots": {"segments": [{"prompt": "第一段", "seconds": 6}, {"prompt": "第二段", "seconds": 6}], "archive_dir": "h3s-p1", "guide_frames": "12", "turbo": True, "steps": 8}}
+chain = jp.plan_jobs([CHAIN], instances=INST, known_media=set())["rows"][0]
+print("续拍链（guide_frames 非法 + 链头没起始帧）→", chain["problems"])
+checks.append(("guide_frames 不在枚举里必须拦", chain["blocked"] is True and any("引导帧数" in p for p in chain["problems"])))
+checks.append(("链头没有起始帧要提示退成 t2v", any("t2v" in p for p in chain["problems"])))
+chain_ok = jp.plan_jobs([dict(CHAIN, slots={**CHAIN["slots"], "guide_frames": "22", "first_frame": None})], instances=INST, known_media=set())["rows"][0]
+checks.append(("合法档不该被拦", chain_ok["blocked"] is False))
 fails = [name for name, ok in checks if not ok]
 print("\n" + ("全部通过：%d 项" % len(checks) if not fails else "失败项：%s" % fails))
 

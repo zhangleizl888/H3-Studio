@@ -643,9 +643,11 @@ function LlmFormModal({ state, onClose }: { state: { scope: "local" | "cloud"; e
 
 function TemplateTab({ family, project, workflows, fallback }: { family: "image" | "video"; project?: Project; workflows: Workflow[]; fallback: string }) {
   const mut = useProjectMutations(project?.id);
-  const list = workflows.filter((w) => w.family === family);
+  // 任务种类优先（后端按它过滤），老数据没这个字段时退回 family
+  const list = workflows.filter((w) => (w.taskKind ?? w.family) === family);
   const current = project ? (family === "image" ? project.config.imageTemplate : project.config.videoTemplate) || fallback : fallback;
-  const builtinOnly = list.filter((w) => !w.id.startsWith("builtin:"));
+  const builtinOnly = list.filter((w) => !w.id.startsWith("builtin:") && !w.isBuiltin);
+  const usable = builtinOnly.filter((w) => !(w.gaps?.length));
 
   return (
     <div className="space-y-4">
@@ -658,6 +660,32 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
         {project ? <Badge>{project.name}</Badge> : <Badge tone="warn">未打开项目</Badge>}
       </div>
 
+      <button
+        disabled={!project}
+        onClick={() => mut.config.mutate(family === "image" ? { imageTemplate: "auto" } : { videoTemplate: "auto" })}
+        className={cn(
+          "w-full rounded-panel border p-3 text-left transition-colors",
+          current === "auto" ? "border-chrome/50 bg-chrome/10" : "border-hairline bg-sheen hover:border-hairline",
+          !project && "cursor-not-allowed opacity-60",
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={cn("grid h-4 w-4 flex-none place-items-center rounded-full border", current === "auto" ? "border-chrome bg-chrome text-chrome-ink" : "border-rule")}>
+            {current === "auto" && <Check className="h-2.5 w-2.5" aria-hidden />}
+          </span>
+          <span className="text-body font-semibold">自动：按任务从工作流库挑</span>
+          <Badge tone={current === "auto" ? "ok" : undefined}>推荐</Badge>
+          <span className="text-caption text-ink-mute">
+            每次派发前按「这次任务给了什么」打分：有参考视频就走动作迁移，只给首尾帧就走一键出片；库里挑不出才回落内置模板，并在参数表里写明是回落。
+          </span>
+        </div>
+        {project && (
+          <p className="mt-1.5 pl-6 text-caption leading-snug text-ink-mute">
+            当前可用候选 {usable.length} 条{builtinOnly.length > usable.length ? `，另有 ${builtinOnly.length - usable.length} 条因本机缺节点/权重不参与` : ""}
+          </p>
+        )}
+      </button>
+
       {list.length === 0 ? (
         <Empty title={`库里没有${family === "image" ? "出图" : "出片"}模板`} hint="后端没起来，或工作流库里还没有这个族的工作流。内置模板由后端 /api/workflows 一并给出。" />
       ) : (
@@ -665,15 +693,18 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
           {list.map((w) => {
             const key = templateKeyOf(w);
             const selected = key === current;
+            const gaps = w.gaps ?? [];
+            const signals = w.signals ?? [];
             return (
               <li key={w.id}>
                 <button
-                  disabled={!project}
+                  disabled={!project || gaps.length > 0}
+                  title={gaps.length ? `本机还缺：${gaps.map((g) => g.class_type).join("、")}` : undefined}
                   onClick={() => mut.config.mutate(family === "image" ? { imageTemplate: key } : { videoTemplate: key })}
                   className={cn(
                     "w-full rounded-panel border p-3 text-left transition-colors",
                     selected ? "border-chrome/50 bg-chrome/10" : "border-hairline bg-sheen hover:border-hairline",
-                    !project && "cursor-not-allowed opacity-60",
+                    (!project || gaps.length > 0) && "cursor-not-allowed opacity-60",
                   )}
                 >
                   <div className="flex flex-wrap items-center gap-2">
@@ -682,6 +713,8 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
                     </span>
                     <span className="text-body font-semibold">{w.name}</span>
                     <Badge>{w.isBuiltin || w.id.startsWith("builtin:") ? "内置" : "导入"}</Badge>
+                    {gaps.length > 0 && <Badge tone="warn">缺 {gaps.length} 处</Badge>}
+                    {w.verifiedAt && <Badge tone="ok">本机跑通过</Badge>}
                     {w.tags?.slice(0, 3).map((t) => (
                       <span key={t} className="mono rounded-panel border border-rule-soft px-1.5 py-[1px] text-micro text-ink-mute">
                         {t}
@@ -692,9 +725,27 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
                   </div>
                   {w.description && <p className="mt-1 pl-6 text-note leading-snug text-ink-mute">{w.description}</p>}
                   <div className="mt-1.5 pl-6 text-caption leading-snug text-ink-mute">
-                    <span className="label-mono mr-1.5">Slots</span>
-                    {slotSummary(w)}
+                    {signals.length > 0 ? (
+                      <>
+                        <span className="label-mono mr-1.5">吃任务</span>
+                        {signals.slice(0, 7).map((s) => (
+                          <span key={s.name} className="mono mr-1.5">
+                            {s.label}
+                            {s.required ? "*" : ""}
+                          </span>
+                        ))}
+                        {signals.length > 7 ? `等 ${signals.length} 项` : ""}
+                      </>
+                    ) : (
+                      slotSummary(w)
+                    )}
                   </div>
+                  {gaps.length > 0 && (
+                    <p className="mt-1 pl-6 text-caption leading-snug text-warn">
+                      这台实例跑不动：{gaps.slice(0, 2).map((g) => `${g.class_type}${g.pack ? `（要装 ${g.pack}）` : ""}`).join("；")}
+                      {gaps.length > 2 ? ` 等 ${gaps.length} 处` : ""}
+                    </p>
+                  )}
                 </button>
               </li>
             );
@@ -711,8 +762,8 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
 
       {project && builtinOnly.length > 0 && (
         <p className="text-caption leading-snug text-ink-mute">
-          导入的工作流会以它的库 id 记进项目配置，但后端目前只按内置模板建图 —— 选它当默认，派发时会报「没有生成模板」。
-          要真用导入的图，去「工作流库」页试运行，或把它注册成内置模板的同名 key。
+          选中某条导入的工作流 = 每次都按这条填槽（后端把任务落到它自己的输入点上，素材会先上传到该实例）；
+          选「自动」= 让后端按任务形状在库里挑。两条路都会先过参数表：缺必填输入或本机跑不动就不入队。
         </p>
       )}
 

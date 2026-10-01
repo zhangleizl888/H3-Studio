@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   Badge,
@@ -11,6 +11,7 @@ import {
   Select,
   StateGlyph,
   StateLabel,
+  FilterChip,
   Toggle,
   type StateKey,
 } from "../../components/ui";
@@ -258,6 +259,12 @@ export default function Queue() {
                         </td>
                         <td className="px-2 py-2 align-middle whitespace-nowrap">
                           <span className="label">{JOB_KIND_LABEL[j.kind]}</span>
+                          {!!j.workflowName && (
+                            <span className="mono ml-1.5 text-caption text-chrome" title={`选法：${j.chosenBy ?? "手动指定"}`}>
+                              {j.workflowName}
+                              {j.chosenBy?.includes("自动") ? " ·自动选" : j.chosenBy?.includes("回落") ? " ·回落模板" : ""}
+                            </span>
+                          )}
                         </td>
                         <td className="px-2 py-2 align-middle whitespace-nowrap">
                           {inst ? (
@@ -357,21 +364,6 @@ export default function Queue() {
 
       {actionError && <p className="px-1 text-note leading-snug text-state-fail">这条操作没生效：{actionError}</p>}
     </div>
-  );
-}
-
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex items-center rounded-ctl border px-2 py-[3px] text-note transition-colors",
-        active ? "border-transparent bg-ink text-slate" : "border-rule bg-raised text-ink-dim hover:text-ink",
-      )}
-    >
-      {children}
-    </button>
   );
 }
 

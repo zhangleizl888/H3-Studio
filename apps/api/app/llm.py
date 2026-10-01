@@ -44,10 +44,12 @@ from .logging_setup import get_logger, redact
 log = get_logger("llm")
 
 LlmKind = Literal["ollama", "openai_compat"]
-Purpose = Literal["script_parse", "storyboard", "visualize", "h3_prompt", "script_write", "embed"]
+Purpose = Literal["script_parse", "storyboard", "visualize", "h3_prompt", "script_write", "script_chat", "embed"]
 
 # 单次喂给模型的剧本上限。128k 上下文要留给输出与模板，别把整本书塞进去。
 MAX_INPUT_CHARS = 24_000
+#: script_chat 带历史，喂进去的 token 比单轮多得多，历史只留最近这几轮
+CHAT_HISTORY_TURNS = 10
 
 
 class LlmError(Exception):
@@ -331,8 +333,12 @@ _SCHEMAS: dict[str, dict[str, Any]] = {
                         "durationSec": {"type": "number"},
                         "cameraMovement": {"type": "string", "enum": list(UI_CAMERA_MOVES)},
                         "shotSize": {"type": "string", "enum": list(SHOT_SIZES)},
+                        "continuityAnchor": {
+                            "type": "string",
+                            "description": "本镜从上一镜接住什么：动作方向 / 视线目标 / 同一道光 / 同一个道具 / 同一种轮廓 / 同一段声音 / 同一股受力，写成一句可见的话；第一镜写 N/A",
+                        },
                     },
-                    "required": ["index", "sceneName", "characterNames", "action", "dialogue", "visualPrompt", "durationSec", "cameraMovement", "shotSize"],
+                    "required": ["index", "sceneName", "characterNames", "action", "dialogue", "visualPrompt", "durationSec", "cameraMovement", "shotSize", "continuityAnchor"],
                     "additionalProperties": False,
                 },
             }
@@ -352,6 +358,19 @@ _SCHEMAS: dict[str, dict[str, Any]] = {
             "text": {"type": "string", "description": "续写或改写后的剧本正文，沿用输入里的格式、人物称呼与语气"}
         },
         "required": ["text"],
+        "additionalProperties": False,
+    },
+    # 多轮对话改稿：reply 给人看，scriptText 是「确认后整篇替换编辑器」的那一份
+    "script_chat": {
+        "type": "object",
+        "properties": {
+            "reply": {"type": "string", "description": "一两句中文，说清这一轮改了什么、为什么；不超过 80 字，不要复述剧情"},
+            "scriptText": {
+                "type": "string",
+                "description": "改后的完整剧本正文，未改动的部分一字不差带上；这一轮不需要动稿本时返回空串",
+            },
+        },
+        "required": ["reply", "scriptText"],
         "additionalProperties": False,
     },
     # h3_prompt 的 schema 跟着提示词模式走，不在这里写死：见 director.h3_schema
@@ -374,13 +393,28 @@ _PROMPTS: dict[str, str] = {
     "storyboard": (
         "根据这份剧本结构生成分镜镜头表。目标总时长约 {target} 秒，节奏按「{pace}」掌握。\n"
         "镜头规模与每镜时长：{density}\n"
-        "每镜给：动作（这一镜的唯一事件）、台词（没有就空串）、画面提示词、时长秒、运镜、景别。"
-        "时长秒累加等于目标时长；每镜都要有独立的观察任务，不许把同一动作换景别重复描述。"
+        "每镜给：动作（这一镜的唯一事件）、台词（没有就空串）、画面提示词、时长秒、运镜、景别、"
+        "接住上一镜的锚点（动作方向/视线/同一道光/同一道具/同一轮廓/同一段声音/同一股受力，写成一句可见的话；首镜写 N/A）。"
+        "时长秒累加等于目标时长；每镜都要有独立的观察任务，不许把同一动作换景别重复描述，也不许无理由跳切。"
         "角色名与场景名必须来自给定列表，不要发明新角色。\n\n---\n{input}"
     ),
     "script_write": "第一行是要求（例如「接着往下写，约 300 字」或「把这段改得更克制」），其余是剧本正文。按要求只输出剧本正文本身：沿用已有的场次标题格式（【第N幕】场景-时间）、动作行用全角括号包裹、台词写成「角色（神态）：」换行后接台词；不要解释、不要代码围栏、不要加 markdown 标题。\n\n---\n{input}",
     "visualize": "把下面这段中文描述翻译成适合图像生成模型的画面提示词：写主体、动作、构图与景别、光线、色调、材质与氛围；不要写「很美」「震撼」这类评价词，不要否定句。\n\n---\n{input}",
 }
+
+#: 多轮改稿的规矩。和 script_write 的区别是这里带对话历史，且必须回吐整篇正文好让前端做差异预览
+_SCRIPT_CHAT_RULES = """你是这部短剧的编剧助手，正在和创作者一起改这一份稿子。
+【当前剧本正文】是唯一的稿本依据：场次标题格式（【第N幕】场景-时间）、动作行用全角括号包裹、
+「角色（神态）：」换行后接台词的写法、人称、人物称呼与语气一律沿用，不许另起一套格式。
+对话历史里往轮的改稿已经落进这份正文，不要重复执行往轮的指令。
+reply：用一两句中文说清这一轮改了什么、为什么这么改，不超过 80 字，不要复述剧情、不要客套。
+scriptText：改后的【完整】正文，从第一行到最后一行，没有改动的部分一字不差带上；
+这一轮只是问答、不需要动稿本时返回空串。
+绝不允许只返回被改的那一段，也不许用「（其余不变）」这类占位代替没改的部分。"""
+
+
+def _script_chat_system(script: str) -> str:
+    return f"{_SCRIPT_CHAT_RULES}\n\n【当前剧本正文】\n{script.strip() or '（还没有正文，按创作者这一轮的要求新写）'}"
 
 
 def _system_for(purpose: str, mode: str) -> str:
@@ -412,6 +446,7 @@ async def run_purpose(spec: LlmSpec, purpose: Purpose, payload: dict[str, Any], 
     """跑一个用途，返回结构化 dict。前端拿到就直接写进 IndexedDB。
 
     h3_prompt 的 schema、system、预算都跟着 payload 的 mode 走；其它用途不受影响。
+    script_chat 是唯一带多轮 messages 的用途，正文走 payload.script 而不是 input。
     """
     is_h3 = purpose == "h3_prompt"
     if not is_h3 and purpose not in _SCHEMAS:
@@ -434,17 +469,36 @@ async def run_purpose(spec: LlmSpec, purpose: Purpose, payload: dict[str, Any], 
             style=payload.get("style") or "",
         )
         schema = h3_schema(mode)
+        msgs = [{"role": "system", "content": _system_for(purpose, mode)}, {"role": "user", "content": prompt}]
         max_tokens = spec_mode.max_tokens
+        temperature = 0.7
+    elif purpose == "script_chat":
+        script = str(payload.get("script") or "")
+        if len(script) > MAX_INPUT_CHARS:
+            raise LlmError(
+                f"当前剧本 {len(script)} 字，超过单次上限 {MAX_INPUT_CHARS} 字。"
+                "改稿要整篇回吐，超限只会拿到一份被截断的正文 —— 请先分场分段改，或把稿子压短。"
+            )
+        turns = [
+            {"role": str(m.get("role")), "content": str(m.get("content") or "").strip()}
+            for m in (payload.get("messages") or [])
+            if str(m.get("role")) in ("user", "assistant") and str(m.get("content") or "").strip()
+        ][-CHAT_HISTORY_TURNS:]
+        msgs = [{"role": "system", "content": _script_chat_system(script)}, *turns, {"role": "user", "content": text}]
+        schema = _SCHEMAS[purpose]
+        # scriptText 是整篇正文，输出预算按稿子长度推；按单轮问答的 2500 给只会截断成半份稿
+        max_tokens = min(30_000, max(2_500, int(len(script) * 1.2) + 1_500))
         temperature = 0.7
     else:
         prompt = _PROMPTS[purpose].format(input=text, target=target, pace=payload.get("pace") or "均匀", density=storyboard_hint(float(target)))
+        msgs = [{"role": "system", "content": _system_for(purpose, mode)}, {"role": "user", "content": prompt}]
         schema = _SCHEMAS[purpose]
         max_tokens = {"script_parse": 4096, "storyboard": 6000, "visualize": 1024, "script_write": 2500}[purpose]
         temperature = 0.85 if purpose == "script_write" else 0.35 if purpose in {"script_parse", "storyboard"} else 0.7
 
     res = await chat(
         spec,
-        [{"role": "system", "content": _system_for(purpose, mode)}, {"role": "user", "content": prompt}],
+        msgs,
         model=model,
         schema=schema,
         schema_name=purpose,
@@ -463,6 +517,14 @@ async def run_purpose(spec: LlmSpec, purpose: Purpose, payload: dict[str, Any], 
             )
     elif purpose == "storyboard":
         warnings = validate_storyboard(data.get("shots") or [], float(target))
+    elif purpose == "script_chat":
+        # 模型最常见的违约是只回被改的那一段。整篇写回会把没改的段落一起抹掉，所以先量一下体量
+        new = str(data.get("scriptText") or "")
+        if new.strip() and len(new) < len(script) * 0.5:
+            warnings.append(
+                f"改稿只有 {len(new)} 字，比当前正文 {len(script)} 字短一半以上："
+                "多半是模型只回了被改的那一段。展开对比逐段看过再确认写回，否则没改的段落会被一起抹掉。"
+            )
 
     log.info("llm %s(%s) 完成：%dms，%s tokens", purpose, mode, res.latency_ms, res.usage.get("total_tokens", "?"))
     out: dict[str, Any] = {"purpose": purpose, "data": data, "model": res.model, "latencyMs": res.latency_ms, "usage": res.usage}

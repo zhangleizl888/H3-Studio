@@ -312,6 +312,17 @@ function sceneLine(scene?: Scene): string {
   return scene ? `场景：${scene.location || scene.name}${scene.time ? `（${scene.time}）` : ""}` : "";
 }
 
+/**
+ * 衔接锚点：这一镜从上一镜接住什么。
+ * 它是**文字接续**，和 continuesPrevious 的尾帧接续各走各的 —— 勾了续拍也要写，
+ * 因为接过来的不只是画面，还有动作方向、视线、受力和声音。首镜或没填就不出这一句。
+ */
+function anchorOf(shot: Shot): string {
+  const a = shot.continuityAnchor?.trim();
+  if (!a || /^n\/?a$/i.test(a)) return "";
+  return a;
+}
+
 function text(p: H3Prompt, key: string): string {
   const v = (p as unknown as Record<string, unknown>)[key];
   return typeof v === "string" ? v.trim() : "";
@@ -333,6 +344,7 @@ export function buildH3Prompt(shot: Shot, scene?: Scene, chars: Character[] = []
   const cam = `${shot.shotSize || "中景"}，${movementLabel(shot.cameraMovement || "固定")}`;
   const gist = (shot.action || scene?.name || "按剧本推进本镜事件").replace(/\s+/g, " ").slice(0, 60);
   const say = shot.dialogue?.trim();
+  const anchor = anchorOf(shot);
 
   const base = [
     shot.action?.trim(),
@@ -340,6 +352,7 @@ export function buildH3Prompt(shot: Shot, scene?: Scene, chars: Character[] = []
     `镜头：${cam}`,
     sceneLine(scene),
     who ? `出场：${who}` : "",
+    anchor ? `接上一镜：${anchor}` : "",
   ]
     .filter(Boolean)
     .join("；");
@@ -355,10 +368,13 @@ export function buildH3Prompt(shot: Shot, scene?: Scene, chars: Character[] = []
     const block = [
       `镜头1（0-${seconds}s）：${cam}`,
       `    摄像机状态：${cameraGuide(shot.cameraMovement || "固定", "start")}`,
+      anchor ? `    与上一镜的接续：${anchor}` : "",
       `    画面内容：${shot.action || "本镜唯一事件按剧本推进"}${contract ? `；${contract}` : ""}`,
       `    音频：${soundscape}`,
       `    人物台词（清晰口语）：${say ? `"${say}"` : "无"}`,
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     return {
       mode,
       integrated: gist,
@@ -370,7 +386,7 @@ export function buildH3Prompt(shot: Shot, scene?: Scene, chars: Character[] = []
   }
 
   // six_section / hybrid
-  const pulse = `[Shot 1] 0.00-${seconds.toFixed(2)}s. ${cam}. ${shot.action || "本镜唯一事件按剧本推进"}.${say ? ` The character (S1) says: <d>[Chinese]${say}</d> Lips, jaw and facial muscles move in sync with every syllable.` : ""} 主体在镜内发生可见变化，摄影机按上述运镜回应，镜末留下被看见的结果。${seconds > 6 ? "Do not render this as one continuous static shot; place internal beats inside this shot with the time codes above." : "Keep this as one continuous take."}`;
+  const pulse = `[Shot 1] 0.00-${seconds.toFixed(2)}s. ${cam}. ${shot.action || "本镜唯一事件按剧本推进"}.${say ? ` The character (S1) says: <d>[Chinese]${say}</d> Lips, jaw and facial muscles move in sync with every syllable.` : ""}${anchor ? ` 本镜开场接住上一镜留下的：${anchor}。` : ""} 主体在镜内发生可见变化，摄影机按上述运镜回应，镜末留下被看见的结果。${seconds > 6 ? "Do not render this as one continuous static shot; place internal beats inside this shot with the time codes above." : "Keep this as one continuous take."}`;
   const retention = contract
     ? "<Subject 1> identity, face, hairstyle, costume, prop ownership and scene lighting are fully_preserved from <Picture 1>; only the action and camera change."
     : "No reference image supplied: identity must stay consistent across every frame of this shot; no wardrobe or prop drift.";

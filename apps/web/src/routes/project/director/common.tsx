@@ -14,7 +14,7 @@ import type { GenTarget } from "../../../lib/generate";
 import type { GenHandle } from "../../../lib/useGenerate";
 import type { Keyframe, Media, Project, Shot } from "../../../lib/types";
 import { shotLabel } from "../../../lib/prompts";
-import { cn } from "../../../lib/utils";
+import { cn, isStill } from "../../../lib/utils";
 
 export type FrameType = "start" | "end";
 export const FRAME_TYPES: FrameType[] = ["start", "end"];
@@ -148,7 +148,9 @@ export function MediaImage({
   alt?: string;
   onClick?: () => void;
 }) {
-  const src = useMediaSrc(media);
+  // 只有静帧能进 <img>：视频行喂进去会先被读成整段 blob，再画出一个破图标（见 lib/utils 的 isStill）
+  const still = isStill(media) ? media : undefined;
+  const src = useMediaSrc(still);
   return (
     <div
       className={cn("relative overflow-hidden rounded-panel border border-rule-soft bg-slate", onClick && "cursor-zoom-in", className)}
@@ -170,7 +172,7 @@ export function MediaImage({
       {src ? (
         <img src={src} alt={alt ?? "镜头画面"} className="h-full w-full object-cover" loading="lazy" />
       ) : (
-        <MediaFrame seedText={seedText} kind={media ? "image" : "none"} className="absolute inset-0 rounded-none border-0" />
+        <MediaFrame seedText={seedText} kind={!media ? "none" : !still ? "video" : "image"} className="absolute inset-0 rounded-none border-0" />
       )}
       {label && <div className="absolute inset-x-0 bottom-0 bg-black/45 px-1.5 py-[2px] text-micro text-white/85">{label}</div>}
     </div>
@@ -250,4 +252,28 @@ export function pickImage(): Promise<File | null> {
 /** 任务的机器身份色：进度条按所在机器着色 */
 export function machVar(placement: "local" | "cloud_self" | "cloud_runninghub"): string {
   return placement === "local" ? "var(--color-mach-local)" : placement === "cloud_self" ? "var(--color-mach-self)" : "var(--color-mach-rh)";
+}
+
+/**
+ * 静帧预览。导演台的灯箱与「生成历史」「生成回收站」共用这一份 ——
+ * 每个页面各写一个 <img> 兜底就是第四种实现，而它们的失败话术必须一致。
+ */
+export function ImagePreview({ media, alt = "预览" }: { media: Media | undefined; alt?: string }) {
+  const still = isStill(media) ? media : undefined;
+  const src = useMediaSrc(still);
+  if (!media) return <p className="py-8 text-center text-note text-ink-mute">这一版读不回来：可能项目是在别的机器上出的片。</p>;
+  if (!still) return <p className="py-8 text-center text-note text-ink-mute">这条记录不是静帧。要看成片请用「成片」列表或时间轴。</p>;
+  if (!src) return <p className="py-8 text-center text-note text-ink-mute">这个文件还读不回来：检查产出它的实例是否还在，或后端是否起着。</p>;
+  return <img src={src} alt={alt} className="mx-auto max-h-[62vh] w-auto rounded-ctl border border-rule-soft" />;
+}
+
+/**
+ * 成片预览。<video> 走 /api/media/{id}/raw（后端 FileResponse 带 Range，所以能拖进度条），
+ * 回收站里的行要带 ?trashed=1 —— 那件事在 api.media.url 里按 deletedAt 判断，别在这里另开一条取 blob 的路。
+ */
+export function VideoPreview({ media }: { media: Media | undefined }) {
+  const src = useMediaSrc(media);
+  if (!media) return <p className="py-8 text-center text-note text-ink-mute">这一段在索引里找不到记录。</p>;
+  if (!src) return <p className="py-8 text-center text-note text-ink-mute">这个文件还读不回来：产物可能已被清理，或后端没起着。</p>;
+  return <video src={src} controls autoPlay playsInline className="max-h-[62vh] w-full rounded-ctl border border-rule-soft bg-void" />;
 }

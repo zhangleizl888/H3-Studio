@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Aperture, ChevronDown, ChevronRight, Clock, ListChecks, Users } from "lucide-react";
 import { Badge, Button, Empty, Panel } from "../../../components/ui";
+import { SplitHandle, usePane } from "../../../components/SplitPane";
 import { buildCharacterPrompt, buildKeyframePrompt, buildScenePrompt, movementLabel, shotLabel } from "../../../lib/prompts";
 import { renderProgress } from "../../../lib/generate";
 import type { Character, Keyframe, Project, Scene, Shot } from "../../../lib/types";
@@ -16,6 +17,7 @@ interface Props {
 
 /** 拍摄清单：梗概 + 演员表 + 按场次分组的镜头表。所有提示词都是「拼好后的原文」，就地可改可存 */
 export function Manifest({ project, onPatchData, onBackToCreate }: Props) {
+  const pane = usePane("manifest.side", 300, 240, 460);
   const { config, data } = project;
   const script = data.script;
   const progress = renderProgress(project);
@@ -47,8 +49,8 @@ export function Manifest({ project, onPatchData, onBackToCreate }: Props) {
         </span>
       </header>
 
-      <div className="grid items-start gap-4 p-4 xl:grid-cols-[minmax(260px,320px)_1fr]">
-        <div className="space-y-4">
+      <div style={pane.style} className="grid items-start gap-4 p-4 xl:grid-cols-[var(--pane-w)_1fr]">
+        <div className="relative space-y-4">
           <Panel title="故事梗概" dense>
             <div className="space-y-3 p-3">
               {!script ? (
@@ -134,6 +136,7 @@ export function Manifest({ project, onPatchData, onBackToCreate }: Props) {
               )}
             </div>
           </Panel>
+          <SplitHandle pane={pane} side="left" label="拍摄清单左栏宽度" className="hidden xl:block" />
         </div>
 
         <div className="min-w-0">

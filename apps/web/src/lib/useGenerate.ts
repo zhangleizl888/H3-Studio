@@ -57,6 +57,10 @@ export function useGenerator(projectId: string | undefined) {
     qc.invalidateQueries({ queryKey: keys.project(projectId) });
     qc.invalidateQueries({ queryKey: keys.jobs(projectId) });
     qc.invalidateQueries({ queryKey: keys.media(projectId) });
+    // 一次成功生成就是多一个版本：开着的历史面板与生成回收站要自己长一行，
+    // 不该等用户手动刷新（服务端那次 _persist_outputs 已经把行建好了）
+    qc.invalidateQueries({ queryKey: keys.mediaVersions });
+    qc.invalidateQueries({ queryKey: keys.trash });
   }, [projectId, qc]);
 
   /** 把产物从服务端读回并登记进 IndexedDB，然后挂到实体上 */

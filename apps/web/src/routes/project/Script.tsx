@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { CircleCheck, TriangleAlert } from "lucide-react";
-import { Badge, Button, StateGlyph, Tabs } from "../../components/ui";
-import { useLlmDefaults, useLlmRun, useLlms, useProject, useProjectMutations } from "../../lib/hooks";
+import { Badge, Button, Modal, StateGlyph, Tabs } from "../../components/ui";
+import { SplitHandle, usePane } from "../../components/SplitPane";
+import { useLlmDefaults, useLlmRun, useLlms, useProject, useProjectMutations, useScriptVersionActions } from "../../lib/hooks";
 import { flushSaves, queueSave } from "../../lib/localStores";
-import type { AspectRatio, LlmShot, Project } from "../../lib/types";
+import type { AspectRatio, H3PromptMode, LlmShot, Project } from "../../lib/types";
 import { ConfigPanel } from "./script/ConfigPanel";
 import { Manifest } from "./script/Manifest";
 import { ScriptEditor } from "./script/ScriptEditor";
+import { planReprompt, repromptShots, type RepromptPlan } from "./script/reprompt";
+import { ChatDock } from "./script/ChatDock";
 import { LLM_MAX_INPUT_CHARS, buildShots, errText, mergeScriptEntities, normalizeParsed, storyboardBrief } from "./script/merge";
 
 type TabKey = "create" | "manifest";
@@ -16,12 +19,17 @@ type TabKey = "create" | "manifest";
 const STEP_PARSE = "第 1/2 步：正在拆解剧本结构（标题 / 角色 / 场景 / 节拍），预计 1–3 分钟…";
 
 export default function Script() {
+  const pane = usePane("script.config", 340, 260, 560);
   const { id } = useParams();
   const { data: project } = useProject(id);
   const { data: llms } = useLlms();
   const { data: llmDefaults } = useLlmDefaults();
   const muts = useProjectMutations(id);
   const llmRun = useLlmRun(id);
+  // 剧本的 V1/V2 存在服务端（script_versions），正文仍写 IndexedDB：
+  // 版本历史要活到浏览器之外才谈得上回收站与到期真删
+  const versions = useScriptVersionActions(id);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
 
   const [tab, setTab] = useState<TabKey>("create");
   const [draft, setDraft] = useState("");
@@ -30,6 +38,9 @@ export default function Script() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  /** 换提示词模式前先让人看清会动到哪些镜头 */
+  const [modePlan, setModePlan] = useState<RepromptPlan | null>(null);
+  const [applyingMode, setApplyingMode] = useState(false);
 
   // 生成中要挡住重复提交与切页：state 给 UI 看，ref 给事件回调用（回调里拿不到最新 state）
   const projectRef = useRef<Project | null>(null);
@@ -53,6 +64,7 @@ export default function Script() {
     setError(null);
     setDone(null);
     setSaveState("idle");
+    setModePlan(null);
     setTab("create");
   }, [id]);
 
@@ -114,9 +126,66 @@ export default function Script() {
     await muts.data.mutateAsync({ rawScript: draftRef.current, ...patch });
   }
 
+  /**
+   * 生成完成 → 存一版。
+   *
+   * 失败绝不拦住生成：正文已经在编辑器里了，缺的只是一条历史。但一定要吭一声 ——
+   * 用户以为进了历史而其实没进，比看到"这一版没存进历史"糟得多。
+   */
+  async function saveVersion(o: Parameters<typeof versions.snapshot>[0]) {
+    try {
+      await versions.snapshot(o);
+      setSaveNote(null);
+    } catch (e) {
+      setSaveNote(errText(e));
+    }
+  }
+
+  /** 这一版之前的正文。项目第一次存版时服务端会把它补成 V1（需求里那句"存之前的版本"） */
+  const previousText = () => {
+    const p = projectRef.current;
+    return { text: p?.data.rawScript ?? "", writtenAt: p?.data.scriptWrittenAt ?? p?.updatedAt ?? null };
+  };
+
   async function patchConfig(patch: Partial<Project["config"]>) {
     await flushSaves();
     await muts.config.mutateAsync(patch);
+  }
+
+  /**
+   * 换提示词模式。没镜头就直接写 config；有镜头先把改动摊开让人确认，
+   * 确认后按新模式用本地模板重拼 —— 这一步不叫模型，毫秒级完事。
+   */
+  function changePromptMode(next: H3PromptMode) {
+    const p = projectRef.current;
+    if (!p || next === p.config.h3PromptMode) return;
+    if (!p.data.shots.length) {
+      void patchConfig({ h3PromptMode: next });
+      return;
+    }
+    setModePlan(planReprompt(p, next));
+  }
+
+  async function applyPromptMode(includeAi: boolean) {
+    const p = projectRef.current;
+    if (!p || !modePlan) return;
+    setApplyingMode(true);
+    setError(null);
+    try {
+      const res = repromptShots(p, modePlan.mode, includeAi);
+      await patchConfig({ h3PromptMode: modePlan.mode });
+      await patchData({ shots: res.shots });
+      const bits = [`重拼 ${res.toRebuild} 镜`];
+      if (res.already) bits.push(`${res.already} 镜本来就是这档`);
+      if (res.aiKept) bits.push(`保留 ${res.aiKept} 镜 AI 稿`);
+      if (res.clearingVideoPrompt) bits.push(`清空 ${res.clearingVideoPrompt} 镜手写的提交文本`);
+      setDone(`已按「${res.modeName}」${bits.join("，")}。${res.incomplete.length ? `其中 ${res.incomplete.length} 镜本地模板填不满（${res.incomplete[0].reason}），要去导演台让模型重写。` : "字段都齐。"}`);
+      setModePlan(null);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setApplyingMode(false);
+    }
   }
 
   /**
@@ -141,8 +210,11 @@ export default function Script() {
       const res = await llmRun.mutateAsync({ purpose: "script_write", input: `${instruction}\n\n---\n${draft}` });
       const text = String((res.data as { text?: unknown }).text ?? "").trim();
       if (!text) throw new Error("模型没有返回正文");
-      onDraftChange(mode === "continue" ? `${draft.trimEnd()}\n\n${text}` : text);
+      const before = previousText();
+      const next = mode === "continue" ? `${draft.trimEnd()}\n\n${text}` : text;
+      onDraftChange(next);
       await patchData({ taskStep: undefined });
+      await saveVersion({ text: next, source: "ai-write", previous: before });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -242,6 +314,14 @@ export default function Script() {
       const shots = buildShots(list, merged.characters, merged.scenes, current.config, current.data.shots);
       await patchData({ shots, isParsingScript: false, taskStep: undefined, taskError: undefined });
 
+      // 拆解会整片覆盖 characters/scenes/shots，所以这一版的快照要一起进去：
+      // 只存正文的话，回到 V2 也只是回到那段字，回不到那一轮的分镜
+      await saveVersion({
+        text,
+        source: "storyboard",
+        snapshot: { script: merged.script, characters: merged.characters, scenes: merged.scenes, shots },
+      });
+
       const warn = r2.warnings?.length ? `｜后端自检 ${r2.warnings.length} 条：${r2.warnings.slice(0, 3).join("；")}` : "";
       setDone(`已生成 ${shots.length} 个镜头（拆解 ${(r1.latencyMs / 1000).toFixed(0)} 秒 + 分镜 ${(r2.latencyMs / 1000).toFixed(0)} 秒），角色与场景已按名字并回项目。${warn}`);
       setTab("manifest");
@@ -258,6 +338,14 @@ export default function Script() {
   if (!project) {
     return <div className="p-6 text-note text-ink-mute">正在读本地项目…（项目存在这台浏览器的 IndexedDB 里，换浏览器要重新导出导入）</div>;
   }
+
+  /** 让「切档」在界面上看得见落点：这一档已经覆盖了几个镜头、有几个是 AI 重写稿 */
+  const shots = project.data.shots;
+  const onMode = shots.filter((s) => (s.h3Prompt?.mode ?? "three_field") === project.config.h3PromptMode).length;
+  const aiShots = shots.filter((s) => s.h3Prompt?.aiRewrittenAt).length;
+  const modeNote = shots.length
+    ? `${onMode}/${shots.length} 镜的提示词已是这一档${aiShots ? `，其中 ${aiShots} 镜是 AI 重写稿（切档默认保留）` : ""}`
+    : null;
 
   const shotCount = project.data.shots.length;
   const orphan = !busy && project.data.isParsingScript;
@@ -286,6 +374,18 @@ export default function Script() {
             </span>
           )}
           {saveState === "saving" ? <Badge>保存中…</Badge> : <Badge tone="good">已自动保存</Badge>}
+          {/* 存版失败只在这里挂个 chip：正文已经在编辑器里，缺的只是一条历史，不该弹窗打断 */}
+          {saveNote && (
+            <span title={saveNote} className="cursor-help">
+              <Badge tone="warn">这一版没存进历史</Badge>
+            </span>
+          )}
+          <Link
+            to={`/history?tab=script&project=${encodeURIComponent(project.id)}`}
+            className="rounded-ctl border border-rule px-2 py-1 text-note text-ink-dim transition-colors hover:text-ink"
+          >
+            历史版本
+          </Link>
         </div>
       </header>
 
@@ -310,7 +410,11 @@ export default function Script() {
 
       {tab === "create" ? (
         <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-          <div className="flex-none border-b border-rule-soft xl:h-full xl:w-[340px] xl:border-b-0 xl:border-r">
+          <div
+            style={pane.style}
+            className="relative flex-none border-b border-rule-soft xl:h-full xl:w-[var(--pane-w)] xl:border-b-0 xl:border-r"
+          >
+            <SplitHandle pane={pane} side="left" label="配置栏宽度" className="hidden xl:block" />
             <ConfigPanel
               projectName={title}
               outputLanguage={project.config.outputLanguage}
@@ -318,6 +422,8 @@ export default function Script() {
               visualStyle={project.config.visualStyle}
               promptMode={project.config.h3PromptMode}
               promptReason={project.config.h3PromptReason ?? ""}
+              continuity={project.config.continuity}
+              continuityOverlapFrames={project.config.continuityOverlapFrames}
               aspectRatio={project.config.aspectRatio}
               llms={llms}
               shotBackendId={project.config.shotModelBackendId}
@@ -331,8 +437,12 @@ export default function Script() {
               onOutputLanguage={(v) => void patchConfig({ outputLanguage: v })}
               onTargetDuration={(v) => void patchConfig({ targetDurationSec: v })}
               onVisualStyle={(v) => void patchConfig({ visualStyle: v })}
-              onPromptMode={(m) => void patchConfig({ h3PromptMode: m })}
+              onPromptMode={(m) => changePromptMode(m)}
               onPromptReason={(v) => void patchConfig({ h3PromptReason: v })}
+              promptModeBusy={applyingMode}
+              promptModeNote={modeNote}
+              onContinuity={(v) => void patchConfig({ continuity: v })}
+              onContinuityOverlap={(n) => void patchConfig({ continuityOverlapFrames: n })}
               onAspectRatio={(v: AspectRatio) => void patchConfig({ aspectRatio: v })}
               onShotModel={(bid, model) => void patchConfig({ shotModelBackendId: bid, shotModel: model })}
               onGenerate={() => void generate()}
@@ -370,6 +480,67 @@ export default function Script() {
       ) : (
         <Manifest project={project} onPatchData={(patch) => void patchData(patch)} onBackToCreate={() => switchTab("create")} />
       )}
+
+      {tab === "create" && (
+        <ChatDock
+          projectId={id!}
+          sessions={project.data.scriptChats ?? []}
+          script={draft}
+          backendId={project.config.llmBackendId ?? project.config.shotModelBackendId ?? undefined}
+          blocked={busy ? `分镜脚本正在生成（${busy}），这台模型是单槽串行的，等它跑完再对话。` : null}
+          onPersist={(chats) => void patchData({ scriptChats: chats })}
+          onWriteBack={(text) => {
+            onDraftChange(text);
+            setDone(`已由对话助手写回，共 ${text.length} 字。拍摄清单里的镜头没动 —— 要按新稿子重出镜头表，点「生成分镜脚本」。`);
+          }}
+        />
+      )}
+
+      <Modal
+        open={!!modePlan}
+        onClose={() => setModePlan(null)}
+        width={560}
+        title={modePlan ? `切到「${modePlan.modeName}」` : ""}
+        footer={
+          modePlan && (
+            <>
+              <span className="mr-auto text-caption text-ink-mute">本地模板重拼，不叫模型、不占 GPU</span>
+              <Button variant="ghost" onClick={() => setModePlan(null)}>
+                取消
+              </Button>
+              {modePlan.aiKept > 0 && (
+                <Button variant="default" disabled={applyingMode} onClick={() => void applyPromptMode(true)} title="连 AI 重写过的镜头一起用本地模板重拼">
+                  全部重拼
+                </Button>
+              )}
+              <Button variant="primary" loading={applyingMode} disabled={modePlan.toRebuild === 0} onClick={() => void applyPromptMode(false)}>
+                {modePlan.toRebuild === 0 ? "没有要重拼的镜头" : `重拼 ${modePlan.toRebuild} 镜`}
+              </Button>
+            </>
+          )
+        }
+      >
+        {modePlan && (
+          <ul className="space-y-1.5 text-note leading-snug text-ink-dim">
+            <li>
+              项目里 <span className="mono text-ink">{modePlan.total}</span> 个镜头：
+              {modePlan.toRebuild} 镜会按「{modePlan.modeName}」用本地模板重拼结构化提示词。
+            </li>
+            {modePlan.already > 0 && <li>{modePlan.already} 镜本来就是这一档，原样不动。</li>}
+            {modePlan.aiKept > 0 && (
+              <li className="text-mach-rh">
+                {modePlan.aiKept} 镜是模型重写过的导演级稿，本地模板会把它们压回一句话 —— 默认保留。要一起换就点「全部重拼」，或去导演台逐镜让模型按新模式重写。
+              </li>
+            )}
+            {modePlan.clearingVideoPrompt > 0 && (
+              <li className="text-state-fail">
+                {modePlan.clearingVideoPrompt} 镜手写过「提交文本」，重拼时会清空（不清空就还在发旧模式的措辞，等于白切）。清空后提交改由结构化字段现拼。
+              </li>
+            )}
+            <li className="text-ink-mute">重拼出的模板稿深度有限；六段式 / 导演分镜块要真正的内容，仍要去导演台让模型按新模式重写。</li>
+          </ul>
+        )}
+      </Modal>
     </div>
   );
 }

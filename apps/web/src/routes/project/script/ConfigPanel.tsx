@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, BookOpen, BrainCircuit, Info, Wand2 } from "lucide-react";
-import { Badge, Button, Field, Input, Select } from "../../../components/ui";
+import { Badge, Button, Field, Input, Select, Toggle } from "../../../components/ui";
 import { DURATION_OPTIONS, H3_PROMPT_MODES, LANGUAGE_OPTIONS, VISUAL_STYLES, stylePrompt } from "../../../lib/prompts";
 import type { AspectRatio, H3PromptMode, LlmBackend } from "../../../lib/types";
 import { cn } from "../../../lib/utils";
@@ -19,6 +19,8 @@ interface Props {
   visualStyle: string;
   promptMode: H3PromptMode;
   promptReason: string;
+  continuity: boolean;
+  continuityOverlapFrames: number;
   aspectRatio: AspectRatio;
   llms: LlmBackend[] | undefined;
   shotBackendId: string | null | undefined;
@@ -34,6 +36,12 @@ interface Props {
   onVisualStyle: (v: string) => void;
   onPromptMode: (m: H3PromptMode) => void;
   onPromptReason: (v: string) => void;
+  /** 正在按新模式重拼已有镜头：这期间再点一次会把上一半的写盘搅乱 */
+  promptModeBusy: boolean;
+  /** 这一档已经覆盖了几个镜头，让「切档」这件事在界面上看得见结果 */
+  promptModeNote: string | null;
+  onContinuity: (v: boolean) => void;
+  onContinuityOverlap: (n: number) => void;
   onAspectRatio: (v: AspectRatio) => void;
   onShotModel: (backendId: string, model: string | null) => void;
   onGenerate: () => void;
@@ -213,7 +221,10 @@ export function ConfigPanel(p: Props) {
           </div>
         </Field>
 
-        <Field label="H3 提示词模式" hint="换模式不会自动重算已有镜头：去导演台对要改的镜头点「按模式重拼」，或让模型按新模式重写">
+        <Field
+          label="H3 提示词模式"
+          hint="切档会立刻按新模式重拼已有镜头的结构化提示词（本地模板，不占 GPU）；AI 重写过的镜头默认保留"
+        >
           <div className="space-y-1.5">
             {H3_PROMPT_MODES.map((m) => {
               const active = p.promptMode === m.key;
@@ -222,7 +233,7 @@ export function ConfigPanel(p: Props) {
                   key={m.key}
                   type="button"
                   aria-pressed={active}
-                  disabled={lock}
+                  disabled={lock || p.promptModeBusy}
                   onClick={() => p.onPromptMode(m.key)}
                   className={cn(
                     "w-full rounded-ctl border px-2 py-1.5 text-left transition-colors disabled:opacity-45",
@@ -238,7 +249,45 @@ export function ConfigPanel(p: Props) {
               );
             })}
           </div>
+          {p.promptModeBusy ? (
+            <p className="text-caption leading-snug text-ink-dim">正在按新模式重拼镜头…</p>
+          ) : (
+            p.promptModeNote && <p className="text-caption leading-snug text-ink-mute">{p.promptModeNote}</p>
+          )}
           <TextCommit value={p.promptReason} disabled={lock} placeholder="为什么选这个模式（模式决策留痕，避免静默走默认）" onCommit={(v) => p.onPromptReason(v)} />
+        </Field>
+
+        <Field label="镜头衔接" hint="只作用于勾了「承接上一镜」的镜头所串成的续拍链">
+          <div className="rounded-ctl border border-rule-soft bg-white/[0.03] px-2 py-1.5">
+            <Toggle checked={p.continuity} disabled={lock} onChange={p.onContinuity} label={<span className="text-caption">允许把相邻镜头串成一条续拍链</span>} />
+          </div>
+          {p.continuity && (
+            <div className="flex items-center gap-1.5">
+              <span className="mono text-[10px] text-ink-mute">段间重叠帧</span>
+              {[5, 22, 39, 56].map((n) => {
+                const active = p.continuityOverlapFrames === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    aria-pressed={active}
+                    disabled={lock}
+                    title={n <= 5 ? "接缝最短，最省时间" : n >= 56 ? "最顺但每段多出一大截重采样" : "默认档，顺与省之间的折中"}
+                    onClick={() => p.onContinuityOverlap(n)}
+                    className={cn(
+                      "h-6 min-w-[42px] rounded-ctl border px-1.5 text-[11px] transition-colors disabled:opacity-45",
+                      active ? "border-transparent bg-ink text-slate" : "border-rule bg-raised text-ink-dim hover:text-ink",
+                    )}
+                  >
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[10.5px] leading-snug text-ink-mute">
+            关掉这张开关就逐镜单独出片：接缝只靠各自的首帧与「接上一镜」写下的文字锚点接续，不走 h3_chain 的 latent 回放。
+          </p>
         </Field>
 
         <div className="flex items-start gap-2 rounded-ctl border border-rule bg-raised/50 p-2.5 text-caption leading-snug text-ink-mute">

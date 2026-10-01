@@ -32,7 +32,14 @@ from .common import CamelModel
 log = get_logger("api.llm")
 router = APIRouter(tags=["llm"])
 
-PURPOSES = ("script_parse", "storyboard", "visualize", "h3_prompt", "script_write", "embed")
+PURPOSES = ("script_parse", "storyboard", "visualize", "h3_prompt", "script_write", "script_chat", "embed")
+
+
+class ChatTurn(CamelModel):
+    """script_chat 的一轮历史。assistant 只带说明文字，别把上一轮的整篇正文再喂一遍。"""
+
+    role: Literal["user", "assistant"]
+    content: str
 
 
 class LlmBody(CamelModel):
@@ -65,6 +72,9 @@ class RunBody(CamelModel):
     duration_sec: float | None = Field(None, ge=1, le=60)
     aspect: str | None = None
     style: str | None = None
+    # 只有 script_chat 读这两个：多轮历史 + 编辑器里的当前正文（正文不走 input，input 是这一轮的指令）
+    messages: list[ChatTurn] | None = Field(None, max_length=40)
+    script: str | None = None
 
 
 def _to_out(row: LlmBackend) -> dict[str, Any]:
@@ -291,6 +301,8 @@ async def run(body: RunBody, request: Request, _: Any = Depends(login_gate), ses
         "durationSec": body.duration_sec,
         "aspect": body.aspect,
         "style": body.style,
+        "messages": [m.model_dump() for m in body.messages] if body.messages else None,
+        "script": body.script,
     }
     try:
         if dispatcher is None:

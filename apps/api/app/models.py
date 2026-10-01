@@ -1,11 +1,14 @@
-"""服务端 9 张表。
+"""服务端表。
 
 按 A 方案，创作数据（项目/角色/场景/镜头/渲染日志）在浏览器 IndexedDB 里，
 服务端**不建 projects 表**；因此媒体只能用 project_key 软引用客户端项目 id，
 而不是外键。这条约束是刻意的：换后端不会被创作数据绑死。
 
-服务端持有的 9 张：users、refresh_tokens、gen_instances、llm_backends、
-workflows、jobs、instance_locks、media、audit_log。
+服务端持有的：users、refresh_tokens、gen_instances、llm_backends、workflows、
+jobs、instance_locks、media、script_versions、audit_log、app_settings。
+
+`script_versions` 是唯一的例外：它存的是**生成出来的剧本正文本身**，属于创作数据，
+但它存在的理由（版本历史与回收站要活到浏览器之外）恰恰是 IndexedDB 给不了的。
 """
 
 from __future__ import annotations
@@ -29,6 +32,8 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
     text,
+    # ScriptVersion 有一列就叫 text，会在类体里遮蔽同名函数；那列的 DDL 片段一律走这个别名
+    text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -64,6 +69,8 @@ class JobKind(str, enum.Enum):
     detect_shots = "detect_shots"
     assemble = "assemble"
     workflow_test = "workflow_test"
+    # 库里的工作流可以直接产音频（声音克隆那条），kind 必须有它自己的位置
+    audio = "audio"
 
 
 JOB_STATE_PG = ENUM(JobState, name="job_state", created_by_metadata=True)
@@ -175,7 +182,12 @@ class LlmBackend(Base, TimestampMixin):
 
 
 class Workflow(Base, TimestampMixin):
-    """共享工作流库。graph 存归一化后的 API 格式；ui_graph 保留原始导出以便回导。"""
+    """共享工作流库。
+
+    graph 是**本机可执行**的那一份：导入时已经把作者私有节点/云端专有节点换成核心等价节点
+    （见 gen/local_adapt.py），改写清单存在 adaptations 里供界面展示；graph_original 留原始导出，
+    换实例或补装节点后可以重新改写。ui_graph 保留可视化形态以便回导 ComfyUI。
+    """
 
     __tablename__ = "workflows"
 
@@ -185,6 +197,25 @@ class Workflow(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
     family: Mapped[str] = mapped_column(String(24), nullable=False, server_default="video")
+    # 任务种类按产出判：image | video | audio（自动选工作流的第一层过滤）
+    task_kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="video")
+    # 这张图吃什么：提示词/首帧/参考图/参考视频/音频/尺寸……（自动选工作流的匹配依据）
+    signals: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # 能在哪种实例上跑：local | cloud_runninghub | any
+    executes_on: Mapped[str] = mapped_column(String(24), nullable=False, server_default="any")
+    # 本机还缺的节点/权重（空才代表真的能跑）
+    gaps: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # 导入时做过的等价改写，逐条可审计
+    adaptations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # 指向作者机器素材的控件：使用时必须由前端重新指定，不算缺东西
+    pending_media: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    graph_original: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # 允许被「按任务自动选」选中；关掉就只能手动指定
+    auto_select: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # 同一类任务有多条合格工作流时，数字大的先选
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("100"))
+    # 是否在这台实例上真跑通过（试运行成功后由队列写回）
+    verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     source_format: Mapped[str] = mapped_column(String(8), nullable=False)  # api | ui
     graph: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     ui_graph: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -198,7 +229,12 @@ class Workflow(Base, TimestampMixin):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    __table_args__ = (Index("ix_workflows_family_name", "family", "name"),)
+    __table_args__ = (
+        Index("ix_workflows_family_name", "family", "name"),
+        Index("ix_workflows_kind_auto", "task_kind", "auto_select"),
+        CheckConstraint("task_kind in ('image','video','audio')", name="ck_workflows_task_kind"),
+        CheckConstraint("executes_on in ('local','cloud_runninghub','any')", name="ck_workflows_executes_on"),
+    )
 
 
 class Media(Base):
@@ -230,6 +266,53 @@ class Media(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (Index("ix_media_project_role", "project_key", "role", "ref_id"),)
+
+
+class ScriptVersion(Base):
+    """剧本正文的版本历史：一行 = 一次生成完成时的那份正文。
+
+    为什么唯独剧本要进服务端：产物里只有它此前完全没有归宿 —— `POST /llm/run` 同步
+    返回文本，前端直接盖掉 `Project.data.rawScript`，上一版当场消失。而「V1/V2 历史 +
+    回收站 + 到期真删」这三条都必须活到浏览器之外，否则清一次 IndexedDB 就等于
+    没做过回收站。项目实体本身仍在浏览器里（A 方案不变），这里只留生成的那一份。
+    """
+
+    __tablename__ = "script_versions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, default=_uuid)
+    # 与 media 同样的软引用：指向浏览器里的项目 id，服务端不持有项目结构
+    project_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    # 组内序号从 1 开始，进了回收站也照样占着自己的号 —— 删掉 V2 之后 V3 仍然是 V3，
+    # 否则用户对着「V2」恢复出来的东西会和他记忆里的 V2 不是同一份
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 这一版怎么来的：ai-write 续写/改写、storyboard 拆解+分镜、manual 切换前给手改兜底
+    source: Mapped[str] = mapped_column(String(16), nullable=False, server_default="ai-write")
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    # 拆解结果快照 {script,characters,scenes,shots}；纯续写没有，所以给空对象而不是 NULL
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=sa_text("'{}'::jsonb"))
+    # 工作正文来自哪一版由这个标记回答（媒体那边不用同类标记，因为媒体的「当前」是项目实体里的指针）
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa_text("false"))
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # 给用户看的时间。created_at 是审计列（这行何时进库），不能挪也不能改；但首次生成时补存的 V1
+    # 与 V2 在同一次请求里插入，拿 created_at 当"这版正文何时写就"会让 V1 看起来比 V2 还晚，
+    # 按时间排序的界面看到这种结果就直接不显示了 —— 所以显示时间必须是这一列。
+    written_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("project_key", "seq", name="uq_script_versions_project_seq"),
+        CheckConstraint("source IN ('ai-write','storyboard','manual')", name="ck_script_versions_source"),
+        # 一个项目最多一个当前版；回收站里的行不占这个名额（恢复回来若撞上已有 current 由接口负责改判）
+        Index(
+            "uq_script_versions_one_current",
+            "project_key",
+            unique=True,
+            postgresql_where=sa_text("is_current AND deleted_at IS NULL"),
+        ),
+        Index("ix_script_versions_project_created", "project_key", "created_at"),
+    )
 
 
 class Job(Base):

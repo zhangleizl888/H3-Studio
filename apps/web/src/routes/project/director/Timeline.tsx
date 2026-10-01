@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Play, ZoomIn, ZoomOut } from "lucide-react";
 import { Button, Empty } from "../../../components/ui";
-import type { Media, Shot } from "../../../lib/types";
-import { clamp } from "../../../lib/utils";
-import { cardLabel, frameMediaId, timecode, useMediaSrc } from "./common";
+import type { Shot } from "../../../lib/types";
+import { clamp, isStill } from "../../../lib/utils";
+import { cardLabel, frameMediaId, mediaOf, timecode, useMediaSrc } from "./common";
 import type { DirectorCtx } from "./common";
 
 const MIN_PX = 14;
@@ -42,7 +42,9 @@ export function Timeline({ ctx, onPlay }: { ctx: DirectorCtx; onPlay: (mediaId: 
 
       <div className="overflow-x-auto p-3">
         <div className="relative" style={{ width }}>
-          <div className="flex h-4 items-end">
+          {/* 这一行必须自己 relative：刻度 span 是 absolute 的，父级不设定位就会一路找到
+              外层轨道容器，结果整排刻度落到轨道底部，和每格右下角的时码叠在一起 */}
+          <div className="relative flex h-4 items-end">
             {Array.from({ length: Math.floor(total) + 1 }).map((_, s) => (
               <span key={s} className="absolute bottom-0 flex items-end gap-1" style={{ left: s * pxPerSec }}>
                 <span className="mono text-micro leading-none text-ink-mute">{s}s</span>
@@ -90,9 +92,11 @@ function TimelineBlock({
   onPlay: (mediaId: string, title: string) => void;
 }) {
   const videoId = shot.videoMediaIds[0];
-  const thumbId = frameMediaId(shot, "start");
-  const media: Media | undefined = (videoId ? ctx.mediaById.get(videoId) : undefined) ?? (thumbId ? ctx.mediaById.get(thumbId) : undefined);
-  const src = useMediaSrc(media);
+  // 封面只认首帧静帧。原来这里优先取成片视频：media.url() 会把整段视频读成 blob 才给出 src，
+  // 而 <img> 拿到视频 blob 只能画出一个破图标 —— 时间轴上每一格都在白白下一遍片。
+  // 没有首帧的格子如实留占位条纹，读起来才是「哪几段真出了片」。
+  const media = mediaOf(ctx, frameMediaId(shot, "start"));
+  const src = useMediaSrc(isStill(media) ? media : undefined);
   const playable = !!videoId;
 
   return (
