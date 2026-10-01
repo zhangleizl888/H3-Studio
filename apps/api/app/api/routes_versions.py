@@ -495,12 +495,13 @@ WITH base AS (
 ),
 ranked AS (
     SELECT b.*,
+           {_grp('b')} AS group_value,
            row_number() OVER (PARTITION BY b.project_key, b.kind, COALESCE(b.role, ''), {_grp('b')} ORDER BY b.id) AS version,
            count(*)     OVER (PARTITION BY b.project_key, b.kind, COALESCE(b.role, ''), {_grp('b')})              AS version_count
       FROM base b
 )
 SELECT id, uuid, project_key, kind, role, ref_id, path, thumb_path, width, height, fps, duration_ms,
-       bytes, mime, origin, deleted_at, created_at, version, version_count
+       bytes, mime, origin, deleted_at, created_at, group_value, version, version_count
   FROM ranked
  WHERE (CAST(:bucket AS varchar) IS NULL OR kind = CAST(:bucket AS varchar))
    AND (CAST(:role AS varchar) IS NULL OR role = CAST(:role AS varchar))
@@ -523,6 +524,9 @@ def _media_version_out(r: Any) -> dict[str, Any]:
         "bucket": "video" if r["kind"] == "video" else "image",
         "role": r["role"],
         "refId": r["ref_id"],
+        # 服务端实际用来分区的那把键（ref_id 为空时是 jobs/<目录>）。客户端分组必须用它，
+        # 自己按 ref_id 再算一遍会把不同任务的无标签产物塌成一组，V 号就对不上
+        "groupValue": r["group_value"],
         "path": r["path"],
         "bytes": r["bytes"],
         "mime": r["mime"],
@@ -771,7 +775,10 @@ async def list_trash(
         ).mappings().all()
         for r in rows:
             m = _media_version_out(r)
-            items.append({"key": f"media:{m['id']}", "kind": "media", **m, "textPreview": None})
+            # kind 放在 **m 之后：_media_version_out 里那一份是媒体自己的 image/video，
+            # 先写 "media" 会被盖掉，前端就分不出这是产物还是剧本版（媒体自己是 image/video
+            # 这件事由 bucket 说）。顺序反过一次，回收站预览因此瞎了。
+            items.append({"key": f"media:{m['id']}", **m, "kind": "media", "textPreview": None})
 
     if bucket in (None, "script") and project_key:
         srows = (

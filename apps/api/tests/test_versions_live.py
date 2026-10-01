@@ -247,6 +247,43 @@ async def _media_rows(client, pk: str, **params) -> list[dict]:
     return r.json()
 
 
+async def _seed_untagged(pk: str, job_dir: str, count: int) -> list[int]:
+    """造 count 行「没打标签」的产物：role='output'、ref_id 为 NULL、路径在 jobs/<目录>/ 下。
+
+    只插行不写文件 —— 这条测试断言的是分组键，不读 blob。
+    """
+    ids: list[int] = []
+    async with session_factory()() as s:
+        for _ in range(count):
+            mid = await s.scalar(
+                text(
+                    "INSERT INTO media (uuid, project_key, kind, role, ref_id, path, bytes, origin)"
+                    " VALUES (:u, :p, 'image', 'output', NULL, :path, 1, '{\"jobTitle\":\"验收跑\"}') RETURNING id"
+                ),
+                {"u": str(uuid.uuid4()), "p": pk, "path": f"jobs/{job_dir}/out.png"},
+            )
+            ids.append(int(mid))
+        await s.commit()
+    return ids
+
+
+async def test_untagged_rows_group_by_job_dir_and_hand_the_key_back(client, pk):
+    """两次任务的无标签产物不能塌成一组，而且分组键要回传给前端。
+
+    服务端 ref_id 为空时退回 jobs/<任务目录>；客户端如果自己按 refId 再算一遍，
+    真库里 3 行两组会显示成一张「共 3 版」的卡，V 号当场对不上（就是这么发现的）。
+    """
+    await _seed_untagged(pk, "aaaa1111", 2)
+    await _seed_untagged(pk, "bbbb2222", 1)
+    rows = await _media_rows(client, pk, role="output")
+    assert sorted({r["groupValue"] for r in rows}) == ["aaaa1111", "bbbb2222"]
+    by_dir: dict[str, list[tuple[int, int]]] = {}
+    for r in rows:
+        by_dir.setdefault(r["groupValue"], []).append((r["version"], r["versionCount"]))
+    assert sorted(by_dir["aaaa1111"]) == [(1, 2), (2, 2)]
+    assert by_dir["bbbb2222"] == [(1, 1)]
+
+
 async def test_media_numbers_survive_trashing(client, pk):
     """删掉 V2 之后 V3 仍然是 V3 —— 软删条件写进窗口那一层就会重排。"""
     ids = await _seed_media(pk, "character", "char-1", 3)
@@ -276,6 +313,8 @@ async def test_trashed_media_readable_only_with_the_flag(client, pk):
 
     t = (await client.get("/api/trash", params={"project_key": pk})).json()
     assert [i["key"] for i in t["items"]] == [f"media:{ids[0]}"]
+    assert t["items"][0]["kind"] == "media", "union 的判别式不能被媒体自己的 image/video 盖掉，前端要靠它分图/剧本"
+    assert t["items"][0]["bucket"] == "image"
     assert t["items"][0]["daysLeft"] == 100
     assert t["items"][0]["title"] == "定妆 · 测试", "项目实体不在这台浏览器上时，标题只能靠 origin.jobTitle"
 
