@@ -9,6 +9,77 @@ machine or a reinstall can restore them as-is.
 ComfyUI itself, custom node packs, and model weights are **not** here — this repository ships no
 ComfyUI copy. `work/` contains graph JSON plus the manifest only.
 
+## Screens and features
+
+> The 7 shots below run on the **demo fixtures** (`VITE_USE_MOCK=true`, project *Long Night Taxi · Ep. 1*).
+> The UI, interactions and copy are real; the project content is not.
+
+### Dashboard `/`
+
+![Dashboard](assets/screenshots/01-dashboard.png)
+
+Left rail holds the entry cards (new project, asset library, model config, theme); the right side lists
+every project with its current stage and render progress. Below that, three live panels — **queue
+overview**, **instance health** (which ComfyUI boxes are online and how deep their queues are) and
+**disk** usage — and a **needs attention** strip that pairs each failed job with a concrete fix.
+
+### Script `/p/:id/script`
+
+![Script](assets/screenshots/02-script.png)
+
+Project settings on the left (title, output language, target-duration preset, shotlist model, visual
+style), the script editor on the right, **autosaved**. Generating first splits the script into
+characters and scenes, writes them back to the project, then lays out the shotlist against the target
+duration; AI continue / rewrite and a dialogue rework drawer sit alongside. The model field prints its
+live health probe underneath (the "installed but not running" line in the shot is a real probe, not
+placeholder copy).
+
+### Director workbench `/p/:id/director`
+
+![Director](assets/screenshots/03-director.png)
+
+One card per shot: camera move, first/last frames, prompt and render state (done / running / failed are
+visually distinct), with a **timeline** at the bottom laying the whole episode out in seconds. The header
+carries the batch actions — generate all first frames, regenerate all videos — plus a live indicator of
+whether the local GPU is currently held by rendering, the prompt-enhancement toggle and save state.
+
+### Job queue `/p/:id/queue`
+
+![Queue](assets/screenshots/04-queue.png)
+
+Jobs queue server-side, so closing the page does not stop them. The table shows state, kind, instance,
+progress, queue position, attempts, elapsed time and cost; filter by state / kind / instance, jump the
+queue by priority, retry or cancel. The line about protocols is literal: `comfy_native` reports real
+percentages, `rh_task` only reports state.
+
+### Settings · Servers `/settings/gen`
+
+![Servers](assets/screenshots/05-servers-workflows.png)
+
+Register generation machines — local ComfyUI, self-hosted cloud, RunningHub proxy or RunningHub task
+queue — probed online every 12 s, with test-connection, set-default and delete. The block below explains
+the hard constraint behind this app: ComfyUI only has same-origin protection and RunningHub keeps its
+API key in the URL path, so the browser never talks to either directly.
+
+### Settings · Workflow library (second tab on the same page)
+
+![Workflows](assets/screenshots/05b-workflow-library.png)
+
+**This is what the `work/` bundle looks like once imported.** Imported entries on top, built-in templates
+below; each card can swap its JSON, run a health check, bind default weights per server, sync, and
+download. The "import workflow (JSON)" button at the top right is exactly the path
+`work/import_workflows.py` takes, and "align whole library" recomputes weight slots against the current
+instance's `/object_info`.
+
+### Settings · Model config `/settings/llm`
+
+![Model config](assets/screenshots/06-llm.png)
+
+Backends for the text stages (script breakdown, shotlist, prompt rewrite). The local port scan identifies
+servers by **response shape**, not just port, and offers launch commands for Ollama / llama.cpp / LM
+Studio / vLLM; local and cloud are managed separately so neither drags the other down, and local models
+keep working offline.
+
 ## Layout
 
 ```
