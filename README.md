@@ -1,12 +1,11 @@
 # H3 Studio workflow bundle (`work/`)
 
-This directory holds the **workflow deliverables** for H3 Studio: the 7 ComfyUI graphs the product
+`work/` holds the **workflow deliverables** for H3 Studio: the 7 ComfyUI graphs the product
 actually uses, exported from the live workflow library together with their metadata, so a fresh
 machine or a reinstall can restore them as-is.
 
 ComfyUI itself, custom node packs, and model weights are **not** here — this repository ships no
-ComfyUI copy. `work/` contains graph JSON plus the manifest only. See the root
-[`README.md`](../README.md) for preparing the generation side.
+ComfyUI copy. `work/` contains graph JSON plus the manifest only.
 
 ## Layout
 
@@ -23,8 +22,6 @@ work/
 │   ├── voice-clone-qwen3-tts.api.json  / .ui.json
 │   ├── klein-character-sheet.api.json  / .ui.json
 │   └── klein-instruct-edit.api.json    / .ui.json
-├── README.zh.md
-└── README.md
 ```
 
 `*.api.json` is the **directly executable** graph (author-private nodes already replaced by their

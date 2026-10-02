@@ -1,11 +1,11 @@
 # H3 Studio 工作流包（`work/`）
 
-本目录是 H3 Studio 的**工作流交付物**：项目跑起来真正会用的 7 张 ComfyUI 图，连元数据一起从运行中的
+`work/` 是 H3 Studio 的**工作流交付物**：项目跑起来真正会用的 7 张 ComfyUI 图，连元数据一起从运行中的
 工作流库里导出成文件，换一台机器、重装一次系统都能原样导回来。
 本项目基于此链接开源项目改进，请给作者点一个Starred，https://github.com/bo961386926/manga-studio.git
 
 ComfyUI 本体、自定义节点包和模型权重**都不在这里**——本仓库不携带任何 ComfyUI 版本，
-`work/` 只放图 JSON 与清单。生成侧的准备步骤见根目录 [`README.zh.md`](../README.zh.md)。
+`work/` 只放图 JSON 与清单。
 
 ## 目录内容
 
@@ -22,8 +22,6 @@ work/
 │   ├── voice-clone-qwen3-tts.api.json  / .ui.json
 │   ├── klein-character-sheet.api.json  / .ui.json
 │   └── klein-instruct-edit.api.json    / .ui.json
-├── README.zh.md
-└── README.md
 ```
 
 `.api.json` 是**本机能直接执行的那一份**（作者私有节点已换成 ComfyUI 核心等价节点、权重名已对齐）；
