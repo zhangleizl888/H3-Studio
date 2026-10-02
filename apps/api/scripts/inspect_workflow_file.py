@@ -19,7 +19,7 @@ def main() -> int:
     ap.add_argument("path")
     ap.add_argument("--base", default=BASE)
     ap.add_argument("--instance", default=None)
-    ap.add_argument("--login", default="admin:1234")
+    ap.add_argument("--login", default="admin:12345")
     args = ap.parse_args()
 
     user, _, pwd = args.login.partition(":")

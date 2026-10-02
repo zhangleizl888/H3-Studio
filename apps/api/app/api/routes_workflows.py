@@ -26,11 +26,15 @@ from ..gen.local_adapt import adapt_graph, object_info_with_shim, prune_unavaila
 from ..gen.subgraph import flatten_subgraphs
 from ..gen.templates import TEMPLATES
 from ..gen.workflow import ConversionError, api_to_ui, apply_slots, extract_slots, to_node_overrides, ui_to_api
-from ..gen.workflow_inputs import derive
+from ..gen.workflow_inputs import derive, mode_of
 from ..logging_setup import get_logger, redact
 from ..models import Job, Workflow
 from ..security import admin_gate, dispatch_gate, login_gate
 from .common import CamelModel
+# 试运行要走的入队逻辑在任务路由里：这里以前直接调 `_enqueue`/`JobCreate` 却两个都没 import，
+# 结果点「发起试运行」百分之百 500（NameError: name '_enqueue' is not defined）。
+from .routes_auth import _audit
+from .routes_jobs import JobCreate, _enqueue
 
 log = get_logger("api.workflows")
 router = APIRouter(tags=["workflows"])
@@ -128,7 +132,9 @@ def build_executable(raw: Any, source: str, object_info: dict[str, Any]) -> dict
     }
 
 
-def _wf_out(row: Workflow) -> dict[str, Any]:
+def _wf_out(row: Workflow, bindings: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    mode, mode_label = mode_of(row.task_kind, list(row.signals or []))
+    graph_bytes = len(json.dumps(row.graph or {}, ensure_ascii=False).encode("utf-8"))
     return {
         "id": str(row.id),
         "uuid": row.uuid,
@@ -137,6 +143,14 @@ def _wf_out(row: Workflow) -> dict[str, Any]:
         "tags": list(row.tags or []),
         "family": row.family,
         "taskKind": row.task_kind,
+        # 界面上「工作流库」按模式分组（文生视频 / 图生视频 / 全能参考 …），
+        # 这是从任务信号里读出来的，不是又一份要人维护的标签
+        "mode": mode,
+        "modeLabel": mode_label,
+        "sourceFile": row.source_file or f"{row.name}.json",
+        "jsonBytes": graph_bytes,
+        # 实例 id → 绑了几项。卡片上「本机已绑 4 项」读的就是这个
+        "bindings": {iid: len(ov or {}) for iid, ov in (bindings or {}).items()},
         "executesOn": row.executes_on,
         "signals": list(row.signals or []),
         "gaps": list(row.gaps or []),
@@ -164,6 +178,12 @@ def _template_out(key: str) -> dict[str, Any]:
         "description": t.description,
         "tags": ["内置", t.group],
         "family": t.kind,
+        "taskKind": t.kind,
+        "mode": t.kind,
+        "modeLabel": "内置模板",
+        "sourceFile": f"内置 · {key}",
+        "jsonBytes": 0,
+        "bindings": {},
         "sourceFormat": "api",
         # 模板槽位与 WorkflowSlot 形状不同，前端按 builtin 分支渲染
         "slots": [s.as_dict() for s in t.slots],
@@ -220,18 +240,28 @@ def _analyze(graph: dict[str, Any], object_info: dict[str, Any], slots: list[Any
 
 @router.get("/workflows")
 async def list_workflows(_: Any = Depends(login_gate), session=Depends(get_session)) -> list[dict[str, Any]]:
+    from ..workflow_bindings import load_map
+
     rows = (await session.execute(select(Workflow).order_by(Workflow.id))).scalars().all()
-    return [_template_out(k) for k in TEMPLATES] + [_wf_out(r) for r in rows]
+    # 一次问齐所有绑定再分发给各行：卡片上「本机已绑 4 项」要在列表里就有，
+    # 逐条查会变成打开这一页就打 N 次 SQL
+    bindings = await load_map(session, [str(r.id) for r in rows])
+    return [_template_out(k) for k in TEMPLATES] + [_wf_out(r, bindings.get(str(r.id))) for r in rows]
 
 
 @router.get("/workflows/select")
-async def select_preview(request: Request, kind: str = "video", instance_id: str | None = None,
+async def select_preview(request: Request, kind: Literal["image", "video", "audio"] = "video",
+                         instance_id: str | None = None,
                          slots: str | None = None, _: Any = Depends(login_gate),
                          session=Depends(get_session)) -> dict[str, Any]:
     """给前端看「这次任务会自动挑中哪条工作流、为什么」—— 只排序，不建任务。
 
     slots 传 JSON 字符串（信号写法）。库里没有合适的就返回空 candidates，
     前端要如实显示「回落内置模板」，别装作命中了工作流。
+
+    kind 只认这三类：库里 task_kind 的检查约束就是它们。写错的 kind 以前会
+    一路走到 `Task.from_params` 被静悄悄兜成 "video"，界面拿到的是「video 的候选」
+    却以为问的是别的 —— 现在由 FastAPI 直接 422，说清楚能填什么。
     """
     from ..workflow_select import Task, rank
 
@@ -264,7 +294,10 @@ async def get_workflow(workflow_id: str, _: Any = Depends(login_gate), session=D
     row = await session.get(Workflow, int(workflow_id)) if workflow_id.isdigit() else None
     if row is None:
         raise HTTPException(404, f"工作流 {workflow_id} 不存在")
-    return {**_wf_out(row), "graph": row.graph}
+    from ..workflow_bindings import load_map
+
+    bindings = await load_map(session, [str(row.id)])
+    return {**_wf_out(row, bindings.get(str(row.id))), "graph": row.graph}
 
 
 @router.post("/workflows/validate")
@@ -369,6 +402,7 @@ async def import_workflow(
         adaptations=built["adaptations"],
         pending_media=built["pending_media"],
         graph_original=built["api_source"],
+        source_file=(file.filename or "")[:200] or None,
         priority=priority,
         source_format=source,
         graph=graph,
@@ -379,6 +413,17 @@ async def import_workflow(
         object_info_hash=_digest(json.dumps(sorted(object_info), ensure_ascii=False)),
     )
     session.add(row)
+    await session.flush()  # 先拿到 row.id，审计条目才指得准
+    await _audit(
+        session,
+        user_id=getattr(actor, "id", None),
+        actor=getattr(actor, "username", None),
+        action="workflow.import",
+        target=f"{row.id} · {row.name}",
+        request=request,
+        detail={"sourceFormat": source, "slots": len(slots), "gaps": len(built["gaps"]),
+                "adaptations": len(built["adaptations"])},
+    )
     await session.commit()
     await session.refresh(row)
     log.info("工作流 %s 导入完成（%d 节点 / %d 槽位 / %d 处改写 / %d 个缺口），操作人：%s",
@@ -435,13 +480,29 @@ async def rescan_workflow(workflow_id: str, request: Request, instance_id: str |
 
 
 @router.delete("/workflows/{workflow_id}", status_code=204)
-async def delete_workflow(workflow_id: str, actor: Any = Depends(admin_gate), session=Depends(get_session)) -> None:
+async def delete_workflow(workflow_id: str, request: Request, actor: Any = Depends(admin_gate), session=Depends(get_session)) -> None:
     if workflow_id.startswith("builtin:"):
         raise _bad("内置模板不能删")
     row = await session.get(Workflow, int(workflow_id)) if workflow_id.isdigit() else None
     if row is None:
         raise HTTPException(404, f"工作流 {workflow_id} 不存在")
+    name, task_kind = row.name, row.task_kind
+    # 绑定表对 workflows 没有外键（内置模板也要能往这张表里放，所以 ref 是字符串），
+    # 删条目时必须顺手把它那些绑定一起清掉，不然留着的是指不到工作流的孤儿行
+    from ..workflow_bindings import drop
+
+    await drop(session, str(row.id))
     await session.delete(row)
+    # 「删除这份工作流」在界面上说的是删定义与槽位、留下任务与媒体 —— 那这一步必须可回溯
+    await _audit(
+        session,
+        user_id=getattr(actor, "id", None),
+        actor=getattr(actor, "username", None),
+        action="workflow.delete",
+        target=f"{workflow_id} · {name}",
+        request=request,
+        detail={"taskKind": task_kind},
+    )
     await session.commit()
 
 
@@ -484,20 +545,25 @@ async def workflow_models(workflow_id: str, request: Request, instance_id: str |
         raise _bad(f"实例 {chosen} 的协议答不出模型清单（只有 comfy_native 支持 /object_info）")
 
     notes: list[str] = []
-    if workflow_id.startswith("builtin:"):
-        key = workflow_id.split(":", 1)[1]
-        if key not in TEMPLATES:
-            raise HTTPException(404, f"没有内置模板 {key}")
-        slots = await builtin(client, key)
-        name = TEMPLATES[key].label
-    else:
-        row = await session.get(Workflow, int(workflow_id)) if workflow_id.isdigit() else None
-        if row is None:
-            raise HTTPException(404, f"工作流 {workflow_id} 不存在")
-        slots = await extract(client, row.graph or {})
-        name = row.name
-        if row.gaps:
-            notes.append(f"这条还有 {len(row.gaps)} 处缺口，装上节点包后重新扫描才会补齐清单")
+    try:
+        if workflow_id.startswith("builtin:"):
+            key = workflow_id.split(":", 1)[1]
+            if key not in TEMPLATES:
+                raise HTTPException(404, f"没有内置模板 {key}")
+            slots = await builtin(client, key)
+            name = TEMPLATES[key].label
+        else:
+            row = await session.get(Workflow, int(workflow_id)) if workflow_id.isdigit() else None
+            if row is None:
+                raise HTTPException(404, f"工作流 {workflow_id} 不存在")
+            slots = await extract(client, row.graph or {})
+            name = row.name
+            if row.gaps:
+                notes.append(f"这条还有 {len(row.gaps)} 处缺口，装上节点包后重新扫描才会补齐清单")
+    except GenError as exc:
+        # 实例没在跑 / object_info 读断是常事（这台机器上 ComfyUI 会被重启）。
+        # 报 500 前端只能说「请求失败」，这里要把「哪台实例、为什么」原话给出去。
+        raise _bad(redact(exc.message)) from exc
 
     if not slots:
         notes.append("这张图上没有可替换的权重位（或者那台实例一个候选都没报出来）")
@@ -587,7 +653,6 @@ class WorkflowPatch(CamelModel):
     description: str | None = None
     tags: list[str] | None = None
 
-
 @router.patch("/workflows/{workflow_id}")
 async def patch_workflow(workflow_id: str, body: WorkflowPatch, actor: Any = Depends(admin_gate),
                          session=Depends(get_session)) -> dict[str, Any]:
@@ -608,3 +673,510 @@ async def patch_workflow(workflow_id: str, body: WorkflowPatch, actor: Any = Dep
     log.info("工作流 %s 配置更新（autoSelect=%s priority=%s），操作人：%s", row.name, row.auto_select,
              row.priority, getattr(actor, "username", "-"))
     return _wf_out(row)
+
+
+# ───────── 按实例的权重绑定 · 体检 · 同步 · 换 JSON ─────────
+#
+# 这三件事共用一个前提：库里那条工作流在**每台**实例上都可以有自己的默认权重。
+# 图里写死的文件名只是「导入那台机器上的那一版」，换到另一台机器上要么对齐、要么由人挑，
+# 而不是拿 align_graph 猜一个 —— 猜错过一次（把 H3 底模配成 Qwen-Image），代价是一整轮
+# 看不懂的采样错。所以这里所有兜底都只走 comfy_native.resolve_model_name 那套族判据，
+# 认不出来就明说「这台没有」，绝不就近凑。
+
+
+class BindingBody(CamelModel):
+    instance_id: str
+    # {"127.unet_name": "MiniMax_H3_...safetensors"}；空值 = 清掉这一位，全空 = 删掉整条绑定
+    overrides: dict[str, str] = {}
+
+
+class BindingSyncBody(CamelModel):
+    source_instance_id: str
+    target_instance_ids: list[str] = []
+    # 未绑定的位也按目标实例对齐一遍：图里写死的是导入那台机器的文件名，换台机器多半不存在
+    align_unbound: bool = True
+
+
+class SyncAllBody(CamelModel):
+    source_instance_id: str
+    target_instance_ids: list[str] = []
+    align_unbound: bool = True
+    # 目标上已经配过的条目不再动：整库对齐常常是「补上没同步过的」而不是覆盖手工挑选
+    only_missing: bool = False
+    include_builtin: bool = False
+
+
+class WorkflowCheckBody(CamelModel):
+    instance_ids: list[str] = []
+
+
+class GraphReplace(CamelModel):
+    graph: str | dict[str, Any]
+    instance_id: str | None = None
+
+
+def _parts_from_template(key: str) -> dict[str, Any] | None:
+    """内置模板那份「能换的位写在代码里」的清单。认不出这个 key 给 None。"""
+    from ..gen.model_slots import BUILTIN_MODEL_LOADERS
+
+    t = TEMPLATES.get(key)
+    if t is None:
+        return None
+    specs = BUILTIN_MODEL_LOADERS.get(key, [])
+    return {
+        "ref": f"builtin:{key}",
+        "name": t.label,
+        "row": None,
+        "graph": None,
+        "classMap": {node: ct for node, ct, _field, _label in specs},
+        "gaps": [],
+        "taskKind": t.kind,
+        "signals": [],
+        "executesOn": "any",
+        "autoSelect": False,
+        "priority": None,
+        "verifiedAt": None,
+        "nodeCount": None,
+    }
+
+
+def _parts_from_row(row: Workflow) -> dict[str, Any]:
+    graph = row.graph or {}
+    return {
+        "ref": str(row.id),
+        "name": row.name,
+        "row": row,
+        "graph": graph,
+        "classMap": {str(k): str((v or {}).get("class_type") or "") for k, v in graph.items()},
+        "gaps": list(row.gaps or []),
+        "taskKind": row.task_kind,
+        "signals": list(row.signals or []),
+        "executesOn": row.executes_on,
+        "autoSelect": bool(row.auto_select),
+        "priority": row.priority,
+        "verifiedAt": row.verified_at.isoformat() if row.verified_at else None,
+        "nodeCount": len(graph),
+    }
+
+
+async def _ref_parts(request: Request, session, workflow_id: str) -> dict[str, Any]:
+    """把 "28" / "builtin:h3_video" 归成一份 {ref, name, graph, classMap, gaps, row}。
+
+    内置模板的图是派发时在服务端现拼的（模型名要问实例、素材要先上传），所以它没有 graph，
+    能换的位与节点号写在 gen/model_slots.BUILTIN_MODEL_LOADERS 里 —— 那边对不上时
+    apply() 会报「图上没有这个节点」，不会静默换错。
+    """
+    if workflow_id.startswith("builtin:"):
+        parts = _parts_from_template(workflow_id.split(":", 1)[1])
+        if parts is None:
+            raise HTTPException(404, f"没有内置模板 {workflow_id}")
+        return parts
+    row = await session.get(Workflow, int(workflow_id)) if workflow_id.isdigit() else None
+    if row is None:
+        raise HTTPException(404, f"工作流 {workflow_id} 不存在")
+    return _parts_from_row(row)
+
+
+async def _slots_for(client, target: dict[str, Any], info: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """这台实例上这条工作流有哪些权重位，以及每一位当前真正会用的文件名。
+
+    info 传 None 时按 class 逐个问（模型编辑弹窗只要一台，不值得拉 30MB 全量）；
+    体检一次问好几台，就把已经拿到的全量递进来。
+    """
+    from ..gen.model_slots import builtin, slots_from_info
+
+    if target["graph"] is None:
+        slots = await builtin(client, str(target["ref"]).split(":", 1)[1])
+        return [s.as_dict() for s in slots]
+    if info is None:
+        from ..gen.model_slots import extract
+
+        return [s.as_dict() for s in await extract(client, target["graph"])]
+    return [s.as_dict() for s in slots_from_info(info, target["graph"])]
+
+
+@router.get("/workflows/{workflow_id}/bindings")
+async def list_bindings(workflow_id: str, request: Request, _: Any = Depends(login_gate),
+                        session=Depends(get_session)) -> dict[str, Any]:
+    """这条工作流在每台实例上的默认权重。列表页要按它给卡片挂「本机已绑 4 项」。"""
+    from ..models import GenInstance
+    from ..workflow_bindings import rows_for
+
+    target = await _ref_parts(request, session, workflow_id)
+    rows = await rows_for(session, target["ref"])
+    insts = {str(r.id): r for r in (await session.execute(select(GenInstance))).scalars()}
+    return {
+        "workflowId": target["ref"],
+        "workflowName": target["name"],
+        "bindings": [
+            {
+                "instanceId": str(r.instance_id),
+                "instanceName": (insts.get(str(r.instance_id)).name if str(r.instance_id) in insts else f"已删除的实例 {r.instance_id}"),
+                "placement": (insts.get(str(r.instance_id)).placement if str(r.instance_id) in insts else "local"),
+                "source": r.source,
+                "overrides": dict(r.overrides or {}),
+                "updatedAt": r.updated_at.isoformat() if r.updated_at else "",
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.put("/workflows/{workflow_id}/bindings")
+async def put_binding(workflow_id: str, body: BindingBody, request: Request,
+                      actor: Any = Depends(admin_gate), session=Depends(get_session)) -> dict[str, Any]:
+    """保存「这条工作流在这台 Server 上用哪些权重」。
+
+    写之前逐个核：节点在不在图上、字段是不是模型位、那个文件这台实例报不报得出来。
+    这一层不查就等于把「Server 上没有这个权重」推迟到派发之后，用户看到的只是一个失败任务。
+    """
+    from ..gen.model_slots import validate as validate_models
+    from ..workflow_bindings import load, save
+
+    target = await _ref_parts(request, session, workflow_id)
+    overrides = {str(k): str(v).strip() for k, v in (body.overrides or {}).items() if str(v or "").strip()}
+    if overrides:
+        try:
+            client = request.app.state.registry.client(body.instance_id)
+        except (KeyError, NotImplementedError) as exc:
+            raise _bad(str(exc)) from exc
+        try:
+            await validate_models(client, target["classMap"], overrides, where=f"实例 {body.instance_id}")
+        except GenError as exc:
+            raise _bad(exc.message) from exc
+    await save(session, target["ref"], body.instance_id, overrides,
+               actor_id=getattr(actor, "id", None))
+    await session.commit()
+    log.info("工作流 %s 在实例 %s 上的权重绑定已更新（%d 项），操作人：%s", target["name"],
+             body.instance_id, len(overrides), getattr(actor, "username", "-"))
+    return {"workflowId": target["ref"], "instanceId": body.instance_id,
+            "overrides": await load(session, target["ref"], body.instance_id)}
+
+
+@router.delete("/workflows/{workflow_id}/bindings/{instance_id}", status_code=204)
+async def delete_binding(workflow_id: str, instance_id: str, request: Request,
+                         actor: Any = Depends(admin_gate), session=Depends(get_session)) -> None:
+    """删掉这一台的绑定 = 恢复用工作流图里写死的那份权重。"""
+    from ..workflow_bindings import drop
+
+    target = await _ref_parts(request, session, workflow_id)
+    await drop(session, target["ref"], instance_id)
+    await session.commit()
+    log.info("工作流 %s 在实例 %s 上的绑定已清除，操作人：%s", target["name"], instance_id,
+             getattr(actor, "username", "-"))
+
+
+async def _slots_from_catalog(catalog: "Catalog", client, parts: dict[str, Any]) -> list[dict[str, Any]]:
+    """这条工作流在那台实例上有哪些权重位。清单走 catalog，一台问一次不重复拉。"""
+    from ..gen.model_slots import builtin, slots_from_info
+
+    if parts["graph"] is None:
+        slots = await builtin(client, str(parts["ref"]).split(":", 1)[1])
+        return [s.as_dict() for s in slots]
+    classes = sorted({str(n.get("class_type") or "") for n in parts["graph"].values() if n.get("class_type")})
+    info = {ct: await catalog.info(ct) for ct in classes}
+    return [s.as_dict() for s in slots_from_info(info, parts["graph"])]
+
+
+async def _sync_one_target(session, actor_id, parts: dict[str, Any], client, catalog: "Catalog",
+                           target_iid: str, source_overrides: dict[str, Any], *,
+                           align_unbound: bool) -> dict[str, Any]:
+    from ..workflow_bindings import plan_sync, save
+
+    graph = parts["graph"] or {}
+    slots = await _slots_from_catalog(catalog, client, parts)
+    plan = await plan_sync(client, catalog, class_map=parts["classMap"], graph=graph,
+                           source=source_overrides, slots=slots, align_unbound=align_unbound,
+                           mode_hint=_mode_hint(graph))
+    await save(session, parts["ref"], target_iid, plan.overrides, source="sync", actor_id=actor_id)
+    return plan.as_dict()
+
+
+@router.post("/workflows/{workflow_id}/bindings/sync")
+async def sync_bindings(workflow_id: str, body: BindingSyncBody, request: Request,
+                        actor: Any = Depends(admin_gate), session=Depends(get_session)) -> dict[str, Any]:
+    """把一台 Server 上配好的默认权重搬到别的 Server 上。规则写在 workflow_bindings.plan_sync。"""
+    from ..workflow_bindings import Catalog, load
+
+    target = await _ref_parts(request, session, workflow_id)
+    source = await load(session, target["ref"], body.source_instance_id)
+    if not source and not body.align_unbound:
+        raise _bad(f"实例 {body.source_instance_id} 上这条工作流还没有绑定：要么先在那台上配一次，"
+                   "要么勾上「未绑定的位也按目标实例对齐」")
+    registry = request.app.state.registry
+    results: list[dict[str, Any]] = []
+    for iid in body.target_instance_ids or []:
+        if str(iid) == str(body.source_instance_id):
+            continue
+        try:
+            client = registry.client(str(iid))
+        except (KeyError, NotImplementedError) as exc:
+            results.append({"instanceId": str(iid), "ok": False, "error": str(exc),
+                            "applied": [], "converted": [], "aligned": [], "skipped": [],
+                            "missingNodes": [], "blocked": False, "written": 0})
+            continue
+        plan = await _sync_one_target(session, getattr(actor, "id", None), target, client, Catalog(client),
+                                      str(iid), source, align_unbound=body.align_unbound)
+        results.append({"instanceId": str(iid), "instanceName": _instance_name(registry, str(iid)),
+                        "ok": True, **plan})
+    await session.commit()
+    log.info("工作流 %s 的权重绑定从实例 %s 同步到 %d 台，操作人：%s", target["name"],
+             body.source_instance_id, len(results), getattr(actor, "username", "-"))
+    return {"workflowId": target["ref"], "workflowName": target["name"],
+            "sourceInstanceId": body.source_instance_id, "results": results}
+
+
+@router.post("/workflows/sync-all")
+async def sync_all_bindings(body: SyncAllBody, request: Request, actor: Any = Depends(admin_gate),
+                            session=Depends(get_session)) -> dict[str, Any]:
+    """整库对齐：接了第二台 ComfyUI 时不必逐条点同步。
+
+    每台实例只建一个 Catalog（节点清单跨工作流复用），否则「N 条 × 每个位 × M 台」会把
+    /object_info/{class} 打成上百次重复请求 —— 实例正在出片时那就是自己把自己的读请求挤断。
+    """
+    from ..workflow_bindings import Catalog, load_map
+
+    registry = request.app.state.registry
+    targets = [str(i) for i in (body.target_instance_ids or []) if str(i) != str(body.source_instance_id)]
+    if not targets:
+        raise _bad("没有可同步的目标实例（源与目标不能是同一台）")
+    rows = (await session.execute(select(Workflow).order_by(Workflow.id))).scalars().all()
+    parts_list = [_parts_from_row(r) for r in rows]
+    if body.include_builtin:
+        parts_list += [p for p in (_parts_from_template(k) for k in TEMPLATES) if p is not None]
+    refs = [p["ref"] for p in parts_list]
+    existing = await load_map(session, refs)
+
+    clients: dict[str, Any] = {}
+    catalogs: dict[str, Catalog] = {}
+    for iid in targets:
+        try:
+            clients[iid] = registry.client(iid)
+            catalogs[iid] = Catalog(clients[iid])
+        except (KeyError, NotImplementedError) as exc:
+            clients[iid] = None
+            log.warning("整库同步跳不过去：实例 %s 拿不到客户端（%s）", iid, str(exc)[:120])
+
+    out: list[dict[str, Any]] = []
+    totals = {"workflows": 0, "written": 0, "aligned": 0, "skipped": 0, "blocked": 0}
+    for parts in parts_list:
+        source = {str(k): str(v) for k, v in ((existing.get(parts["ref"]) or {}).get(str(body.source_instance_id)) or {}).items()}
+        already = {iid: (existing.get(parts["ref"]) or {}).get(iid) or {} for iid in targets}
+        picked = [iid for iid in targets if not (body.only_missing and already.get(iid))]
+        if not picked:
+            out.append({"workflowId": parts["ref"], "workflowName": parts["name"], "untouched": True,
+                        "reason": "目标上都已经配过" if body.only_missing else "没有可同步的目标",
+                        "results": []})
+            continue
+        results: list[dict[str, Any]] = []
+        for iid in picked:
+            client = clients.get(iid)
+            if client is None:
+                results.append({"instanceId": iid, "instanceName": _instance_name(registry, iid), "ok": False,
+                                "error": "拿不到这台实例的客户端（未登记或协议不支持）",
+                                "applied": [], "converted": [], "aligned": [], "skipped": [],
+                                "missingNodes": [], "blocked": False, "written": 0})
+                continue
+            try:
+                plan = await _sync_one_target(session, getattr(actor, "id", None), parts, client, catalogs[iid],
+                                              iid, source, align_unbound=body.align_unbound)
+            except Exception as exc:  # 一条工作流问不到清单不该掀掉整库同步
+                log.warning("整库同步里 %s → 实例 %s 失败：%s", parts["name"], iid, str(exc)[:160])
+                plan = {"applied": [], "converted": [], "aligned": [],
+                        "skipped": [{"key": "*", "reason": f"问这台实例失败：{str(exc)[:120]}"}],
+                        "missingNodes": [], "blocked": False, "written": 0}
+            results.append({"instanceId": iid, "instanceName": _instance_name(registry, iid), "ok": True, **plan})
+        totals["workflows"] += 1
+        for r in results:
+            totals["written"] += r.get("written", 0)
+            totals["aligned"] += len(r.get("aligned", []))
+            totals["skipped"] += len(r.get("skipped", []))
+            totals["blocked"] += 1 if r.get("blocked") else 0
+        out.append({"workflowId": parts["ref"], "workflowName": parts["name"], "untouched": False,
+                    "sourceBound": len(source), "results": results})
+    await session.commit()
+    log.info("权重绑定从实例 %s 整库对齐到 %d 台（%d 条工作流，写 %d 项），操作人：%s",
+             body.source_instance_id, len(targets), len(out), totals["written"], getattr(actor, "username", "-"))
+    return {"sourceInstanceId": body.source_instance_id, "targets": targets,
+            "onlyMissing": body.only_missing, "includeBuiltin": body.include_builtin,
+            "workflows": out, "totals": totals}
+
+
+def _instance_name(registry, instance_id: str) -> str:
+    try:
+        return str(registry.config(instance_id).name)
+    except KeyError:
+        return f"实例 {instance_id}"
+
+
+def _mode_hint(graph: dict[str, Any]) -> str | None:
+    """图里用的是哪个 H3 条件节点，决定该配 fl2va 还是 ref2va 那一系。
+
+    与 align_graph 里同一套判据：作者的合并版名字里两种都写，光看文件名定不了模式。
+    """
+    from ..gen.comfy_native import _FL_MODE_NODES, _REF_MODE_NODES
+
+    classes = {str(v.get("class_type") or "") for v in (graph or {}).values()}
+    if classes & _REF_MODE_NODES:
+        return "ref"
+    if classes & _FL_MODE_NODES:
+        return "fl"
+    return None
+
+
+@router.post("/workflows/{workflow_id}/check")
+async def check_workflow(workflow_id: str, body: WorkflowCheckBody, request: Request,
+                         _: Any = Depends(login_gate), session=Depends(get_session)) -> dict[str, Any]:
+    """工作流体检：逐台实例回答「这条工作流在这台上能不能跑、跑起来用的是哪些权重」。
+
+    只读，不改库。检查完的结论是当次的 —— 实例上的节点与权重随时会变，
+    所以界面不把这份报告存成「上次检查结果」，点一次问一次。
+    """
+    from ..workflow_bindings import load
+
+    target = await _ref_parts(request, session, workflow_id)
+    registry = request.app.state.registry
+    ids = [str(i) for i in (body.instance_ids or [])] or list(registry.ids)
+    reports: list[dict[str, Any]] = []
+    for iid in ids:
+        try:
+            client = registry.client(iid)
+            placement = str(registry.config(iid).placement)
+            name = str(registry.config(iid).name)
+        except (KeyError, NotImplementedError) as exc:
+            reports.append({"instanceId": iid, "instanceName": f"实例 {iid}", "reachable": False,
+                            "error": str(exc), "ok": False, "problems": [f"Server 连接失败：{exc}"],
+                            "gaps": [], "models": [], "binding": {}})
+            continue
+        report: dict[str, Any] = {"instanceId": iid, "instanceName": name, "placement": placement,
+                                  "protocol": getattr(client, "protocol", "comfy_native"),
+                                  "reachable": True, "error": None, "ok": True, "problems": [],
+                                  "gaps": [], "models": [], "binding": {}, "weightProblems": []}
+        try:
+            info = await client.object_info()
+        except Exception as exc:
+            report.update({"reachable": False, "error": str(exc)[:300], "ok": False,
+                           "problems": [f"Server 连接失败或 /object_info 读断：{str(exc)[:160]}"]})
+            reports.append(report)
+            continue
+
+        graph = target["graph"] or {}
+        unknown = sorted({str(n.get("class_type") or "") for n in graph.values()
+                          if n.get("class_type") and str(n.get("class_type")) not in info})
+        report["gaps"] = [{"node": nid, "class_type": str(n.get("class_type") or ""),
+                           "reason": "这台实例上没有这个节点", "pack": ""}
+                          for nid, n in graph.items()
+                          if n.get("class_type") and str(n.get("class_type")) not in info]
+        binding = await load(session, target["ref"], iid)
+        report["binding"] = binding
+        slots = await _slots_for(client, target, info)
+        for slot in slots:
+            bound = str(binding.get(slot["key"]) or "").strip()
+            effective = bound or slot["current"]
+            slot["bound"] = bound
+            slot["effective"] = effective
+            # options 是这台实例报出来的清单：图里写死的和绑定挑的，只要不在清单里就是跑不了
+            slot["missing"] = bool(slot["options"]) and effective not in slot["options"]
+        report["models"] = slots
+        report["weightProblems"] = await _weight_problems(client, [s["effective"] for s in slots])
+
+        problems: list[str] = []
+        if unknown:
+            problems.append(f"这台实例缺 {len(unknown)} 个节点：{'、'.join(unknown[:6])}"
+                            + ("…" if len(unknown) > 6 else "") + "。装上节点包后点「重新扫描」。")
+        if not target["signals"] and target["graph"] is not None:
+            problems.append("没解析出任务信号：这条不会被「按任务自动选」挑中，只能手动指定。")
+        bad_models = [s for s in slots if s["missing"]]
+        if bad_models:
+            problems.append(f"{len(bad_models)} 个权重位在这台上没有对应文件："
+                            + "、".join(f"{s['label']}（{s['effective'] or '空'}）" for s in bad_models[:4]))
+        if report["weightProblems"]:
+            problems.append(f"{len(report['weightProblems'])} 份权重是半截下载，加载不报错但输出恒为 0")
+        if target["executesOn"] == "cloud_runninghub" and placement == "local":
+            problems.append("这份图含 RunningHub 专有节点，派到本机这一台跑不了")
+        report["problems"] = problems
+        report["ok"] = not problems
+        report.update({"taskKind": target["taskKind"], "nodeCount": target["nodeCount"],
+                       "verifiedAt": target["verifiedAt"], "autoSelect": target["autoSelect"],
+                       "priority": target["priority"], "signals": [s.get("name") for s in target["signals"]]})
+        reports.append(report)
+    mode, mode_label = mode_of(target["taskKind"], target["signals"])
+    return {"workflowId": target["ref"], "workflowName": target["name"], "taskKind": target["taskKind"],
+            "mode": mode, "modeLabel": mode_label, "reports": reports}
+
+
+async def _weight_problems(client, values: list[str]) -> list[str]:
+    """半截权重只有配了本机 output 目录的实例答得出（远端没有本地盘可看）。"""
+    if not hasattr(client, "weight_file_problems"):
+        return []
+    try:
+        return await client.weight_file_problems(values)
+    except Exception:
+        return []
+
+
+@router.post("/workflows/{workflow_id}/graph")
+async def replace_graph(workflow_id: str, body: GraphReplace, request: Request,
+                        actor: Any = Depends(admin_gate), session=Depends(get_session)) -> dict[str, Any]:
+    """用一份新导出替换库里这条工作流的图（界面上叫「替换 JSON」）。
+
+    走的是和导入完全同一条流水线：解析 → 本机等价改写 → 对齐权重名 → 剪掉真跑不了的分支
+    → 重抽槽位与任务信号。名字、标签、优先级、绑定都保留 —— 换图不是重建条目，
+    但**节点号可能变**，所以最后要按新图把绑定里那些指不到节点的位摘掉。
+    """
+    from ..gen.model_slots import extract
+    from ..workflow_bindings import prune_to_graph
+
+    if workflow_id.startswith("builtin:"):
+        raise _bad("内置模板的图由服务端现拼，不能替换 JSON")
+    row = await session.get(Workflow, int(workflow_id)) if workflow_id.isdigit() else None
+    if row is None:
+        raise HTTPException(404, f"工作流 {workflow_id} 不存在")
+    raw, source = _parse_graph(body.graph)
+    _, client = await _client_for(request, body.instance_id)
+    info = await client.object_info()
+    built = build_executable(raw, source, info)
+    graph, aligned = await client.align_graph(built["graph"])
+    graph, pruned = prune_unavailable(graph, info)
+    adaptations = built["adaptations"] + [c.as_dict() for c in pruned]
+    info_out = derive(graph, info)
+    slots = [s.as_dict() for s in await extract(client, graph)]
+
+    before_nodes = len(row.graph or {})
+    row.graph_original = built["api_source"]
+    row.graph = graph
+    if source == "ui":
+        row.ui_graph = built["ui_graph"] or raw
+    row.source_format = source
+    row.signals = info_out["signals"]
+    row.task_kind = info_out["kind"]
+    row.family = info_out["kind"]
+    row.gaps = [g.as_dict() for g in built["gaps"]]
+    row.adaptations = adaptations
+    row.pending_media = built["pending_media"]
+    row.executes_on = built["executes_on"]
+    row.slots = slots
+    row.requirements = {"models": [], "customNodes": sorted({g["class_type"] for g in built["gaps"]}),
+                        "resolution": info_out.get("resolution"), "outputs": info_out["outputs"]}
+    row.object_info_hash = _digest(json.dumps(sorted(info), ensure_ascii=False))
+    row.verified_at = None  # 换过图就没在这台机器上跑过了，别留着上一次的绿标
+    removed = await prune_to_graph(session, str(row.id), graph)
+    await session.flush()
+    await _audit(session, user_id=getattr(actor, "id", None), actor=getattr(actor, "username", None),
+                 action="workflow.replace", target=f"{row.id} · {row.name}", request=request,
+                 detail={"nodes": f"{before_nodes} → {len(graph)}", "adaptations": len(adaptations),
+                         "gaps": len(row.gaps)})
+    await session.commit()
+    await session.refresh(row)
+    notes = list(built["notes"]) + [f"节点数 {before_nodes} → {len(graph)}"]
+    notes += [f"{c['node']}.{c.get('field')}：{c['from']} → {c['to']}（本实例上的实际文件名）" for c in aligned]
+    if removed:
+        notes.append(f"{len(removed)} 条权重绑定指向了新图上不存在的节点，已摘掉：{'、'.join(removed[:5])}")
+    if source == "api" and row.ui_graph:
+        notes.append("画布版还是替换前那一份（这次只给了 API 导出），要一起换就在导入时把两个文件都传")
+    log.info("工作流 %s 的图已替换：%d 节点 / %d 处改写 / %d 个缺口，操作人：%s", row.name, len(graph),
+             len(adaptations), len(row.gaps), getattr(actor, "username", "-"))
+    return {"workflow": {**_wf_out(row), "graph": row.graph},
+            "report": {"adaptations": adaptations, "gaps": row.gaps, "alignment": aligned,
+                       "signals": row.signals, "taskKind": row.task_kind, "executesOn": row.executes_on,
+                       "notes": notes, "prunedBindings": removed}}

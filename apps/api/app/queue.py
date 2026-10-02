@@ -29,6 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .db import session_factory
 from .gen.base import GenError, JobState
 from .gen.registry import InstanceRegistry
+from . import media_health
+from . import media_probe
 from .logging_setup import get_logger, redact
 from .models import GenInstance, InstanceLock, Job, JobState as JS, User
 
@@ -208,10 +210,28 @@ class QueueDispatcher:
                 # 第一步是让 ComfyUI 把上一单的权重卸掉：它常驻的 Qwen-Image 栈有 23.6 GB，
                 # 不卸就是「上一单的模型挡住下一单」，跟文本模型没关系。
                 try:
-                    await self.registry.client(instance_id).free()
+                    before = (self._vram_cache.get(instance_id) or (None, None))[1]
+                    client = self.registry.client(instance_id)
+                    await client.free()
                     await asyncio.sleep(1.5)
                     self._vram_cache.pop(instance_id, None)
                     free_ok, why = await self._vram_ok(instance_id)
+                    after = (self._vram_cache.get(instance_id) or (None, None))[1]
+                    if not free_ok and before is not None and after is not None and abs(after - before) < 0.25:
+                        # `/free` 一分钱没还给卡：占着的不是「上一单的权重」，而是这台实例自己的
+                        # 分配池（cudaMallocAsync 只在进程退出时归还）。这时候再让用户去停文本模型是误导。
+                        detail = None
+                        getter = getattr(client, "vram_detail", None)
+                        if getter is not None:
+                            try:
+                                detail = await getter()
+                            except Exception:
+                                detail = None
+                        pool = f"（它自己记在 torch 账上 {detail['pool_gb']:.1f} GB，驱动侧已占 {max(0.0, detail['total_gb'] - detail['free_gb']):.1f} GB）" if detail else ""
+                        why = (
+                            f"{why or ''}。刚对这台实例卸过一遍权重，空闲仍是 {after:.1f} GB —— "
+                            f"占卡的是实例自己的分配池{pool}，要重启 ComfyUI 还得回来；停文本模型对这一份没用"
+                        )
                 except Exception as exc:
                     log.debug("卸模型失败（继续按显存不足处理）：%s", redact(str(exc))[:120])
             if not free_ok and self.gpu is not None and self._is_local(instance_id):
@@ -358,7 +378,49 @@ class QueueDispatcher:
             await s.refresh(job)
             return job
 
-    async def _build_from_template(self, client: Any, params: dict[str, Any], job_id: int) -> dict[str, Any]:
+    async def _binding(self, params: dict[str, Any], instance_id: str) -> dict[str, Any]:
+        """这条工作流（或内置模板）在这台实例上默认用哪些权重。
+
+        读不到就当没有 —— 无库模式、工作流被删、实例被换过，都不该让一次生成卡在绑定上。
+        每次派发都重读一遍而不是在入队时抄进 params：绑定是「这台机器现在的事实」，
+        排队十分钟期间用户完全可能又去改了一次。
+        """
+        from .workflow_bindings import load, ref_for
+
+        ref = ref_for(params.get("workflow_id"), params.get("template"))
+        if not ref:
+            return {}
+        try:
+            async with session_factory()() as s:
+                return await load(s, ref, instance_id)
+        except Exception as exc:
+            log.warning("读 %s 在实例 %s 上的权重绑定失败，这次沿用图里写死的：%s",
+                        ref, instance_id, redact(str(exc))[:160])
+            return {}
+
+    async def _apply_models(self, client: Any, graph: dict[str, Any], params: dict[str, Any],
+                            job_id: int, instance_id: str, *,
+                            binding: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[str]]:
+        """把挑好的权重写进图，并记进 params.fill.modelNotes。没挑就原样返回。
+
+        优先级只有一处算法（gen.model_slots 与 workflow_bindings.merge 同一套）：
+        任务显式挑的 > 这台实例上这条工作流的默认绑定 > 图里写死的文件名。
+        """
+        from .workflow_bindings import merge
+
+        overrides = merge(binding, params.get("models") or {})
+        if not overrides:
+            return graph, []
+        from .gen.model_slots import apply as apply_models
+
+        graph, notes = await apply_models(client, graph, overrides, where=f"实例 {instance_id}")
+        await self._record_model_notes(job_id, graph, notes)
+        if notes:
+            log.info("任务 %s 按选择换权重：%s", job_id, " / ".join(notes)[:400])
+        return graph, notes
+
+    async def _build_from_template(self, client: Any, params: dict[str, Any], job_id: int,
+                                   instance_id: str) -> dict[str, Any]:
         """按模板建图，并把成品图写回 params.graph。
 
         写回不是为了好看：重试与排查时必须能看到当时真正提交给 ComfyUI 的那张图，
@@ -369,14 +431,17 @@ class QueueDispatcher:
 
         ctx = BuildContext(client=client, media_root=Path(get_settings().media_root))
         graph = await build_graph(ctx, params["template"], params.get("slots") or {})
+        graph, _ = await self._apply_models(client, graph, params, job_id, instance_id,
+                                            binding=await self._binding(params, instance_id))
         await self._write_back_graph(job_id, graph)
         return graph
 
-    async def _build_from_workflow(self, client: Any, params: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
+    async def _build_from_workflow(self, client: Any, params: dict[str, Any], job: dict[str, Any],
+                                   instance_id: str) -> dict[str, Any]:
         """按工作流库里的那条填图：把任务落到它自己的输入点上。
 
         与 _build_from_template 同一套纪律 —— 真正提交给 ComfyUI 的图必须回写进 params，
-        否则「工作流说用了 A，实际提交的是 B」这种问题查不出来。
+        否则「工作流说用了 A、实际提交的是 B」这种问题查不出来。
         """
         from .config import get_settings
         from .gen.templates import BuildContext
@@ -397,11 +462,33 @@ class QueueDispatcher:
         task = Task.from_params({"kind": _kind(job), "slots": params.get("slots") or {},
                                  "instancePlacement": params.get("instancePlacement")})
         ctx = BuildContext(client=client, media_root=Path(get_settings().media_root))
-        graph, notes = await prepare({"graph": row.graph, "signals": row.signals or [], "name": row.name},
+        # object_info 一次问齐，填图与「写死的模型名对不对」共用：全量约 30MB，
+        # 实例忙时容易读断，多问一遍就是多一次把任务拖死在 ReadError 上的机会。
+        info = await client.object_info()
+        # 换权重必须在填图之前：prepare 会把这次任务喂不到素材的分支整支撤掉
+        # （二合一那条里的 Apply Whisper 就是这么消失的），事后再去写就只剩
+        # 「图上没有这个节点」，而用户明明挑的是真存在的权重。
+        base_graph, model_notes = await self._apply_models(client, row.graph or {}, params, job_id, instance_id,
+                                                            binding=await self._binding(params, instance_id))
+        graph, notes = await prepare({"graph": base_graph, "signals": row.signals or [], "name": row.name,
+                                      "objectInfo": info},
                                      task, ctx=ctx, filename_prefix=f"h3/job{job_id}")
+        dropped = [k for k in (params.get("models") or {}) if str(k).split(".", 1)[0] not in graph]
+        if dropped:
+            notes.append("这一支在本次任务里没被用到，你挑的权重没有落进最终图：" + "、".join(dropped))
+        from .gen.model_slots import value_problems
+
+        bad = value_problems(info, graph)
+        if bad:
+            raise GenError(
+                f"这条工作流里写死的模型在这台实例上不存在：{'；'.join(bad[:2])}。"
+                "在生成下拉里换一个模型，或去工作流库补上对应权重后重新扫描。",
+                kind="missing_models", retryable=False,
+            )
         if notes:
             log.info("任务 %s 按工作流「%s」填图：%s", job_id, row.name, " / ".join(notes)[:400])
-        await self._write_back_graph(job_id, graph, extra={"fillNotes": notes, "workflowName": row.name})
+        await self._write_back_graph(job_id, graph, extra={"fillNotes": notes, "workflowName": row.name,
+                                                           **({"modelNotes": model_notes} if model_notes else {})})
         return graph
 
     async def _write_back_graph(self, job_id: int, graph: dict[str, Any],
@@ -422,6 +509,23 @@ class QueueDispatcher:
             )
             await s.commit()
 
+    async def _record_model_notes(self, job_id: int, graph: dict[str, Any], notes: list[str]) -> None:
+        """把换权重的结果并进 params：图要留，fill 里已有的填图说明也要留。
+
+        不能像 _write_back_graph 那样整个 fill 覆写掉 —— 换权重发生在填图之后，
+        覆写会把「哪张参考图落到哪个节点」那份审计抹干净。
+        """
+        async with session_factory()() as s:
+            await s.execute(
+                text("UPDATE jobs SET params = jsonb_set("
+                     "jsonb_set(params, '{graph}', CAST(:graph AS jsonb), true), "
+                     "'{fill}', COALESCE(params->'fill', '{}'::jsonb) || CAST(:patch AS jsonb), true) "
+                     "WHERE id=:id"),
+                {"id": job_id, "graph": json.dumps(graph, ensure_ascii=False),
+                 "patch": json.dumps({"modelNotes": notes}, ensure_ascii=False)},
+            )
+            await s.commit()
+
     async def _run(self, job: dict[str, Any], instance_id: str) -> None:
         from .gen.base import Submission
 
@@ -432,13 +536,18 @@ class QueueDispatcher:
             if self.gpu is not None and self._is_local(instance_id):
                 await self.gpu.yield_llm(reason=f"本地任务 {str(job['uuid'])[:8]}")
             graph = params.get("graph")
-            if not graph and params.get("template"):
-                graph = await self._build_from_template(client, params, job["id"])
-            if not graph and params.get("workflow_id"):
-                graph = await self._build_from_workflow(client, params, job)
+            if graph:
+                # 直投那条（工作流页的高级用法）也要能换权重
+                graph, _ = await self._apply_models(client, graph, params, int(job["id"]), instance_id)
+            elif not graph and params.get("template"):
+                graph = await self._build_from_template(client, params, job["id"], instance_id)
+            elif not graph and params.get("workflow_id"):
+                graph = await self._build_from_workflow(client, params, job, instance_id)
             if not graph:
                 raise GenError("任务缺少 graph：既没有直接给图，也没有给 template，也没有 workflow_id",
                                kind="client_validation")
+            # 换权重都在建图/填图那一步里做完了（见 _apply_models）：那里才知道哪些节点
+            # 会被撤掉，写晚了就会对着一个已经不存在的节点报「图上没有这个模型位」。
             missing = await client.missing_models(graph)
             if missing:
                 raise GenError("；".join(missing), kind="missing_models")
@@ -605,7 +714,8 @@ class QueueDispatcher:
                     text(
                         """
                         UPDATE jobs SET state='succeeded', finished_at=now(),
-                                        output=CAST(:o AS bigint[]), cost=:c, error=NULL
+                                        output=CAST(:o AS bigint[]), cost=:c, error=NULL,
+                                        progress=COALESCE(jsonb_set(progress, '{stage}', '"完成"'::jsonb), '{}'::jsonb)
                          WHERE id=:id
                         """
                     ),
@@ -649,7 +759,13 @@ class QueueDispatcher:
                 log.info("任务 %s 可重试（第 %d/%d 次），约 %ds 后重排：%s", str(job["uuid"])[:8], attempts, max_attempts, backoff, error.get("message"))
             else:
                 await s.execute(
-                    text("UPDATE jobs SET state='failed', finished_at=now(), error=:e WHERE id=:id"),
+                    text(
+                        """
+                        UPDATE jobs SET state='failed', finished_at=now(), error=:e,
+                                        progress=COALESCE(jsonb_set(progress, '{stage}', '"失败"'::jsonb), '{}'::jsonb)
+                         WHERE id=:id
+                        """
+                    ),
                     {"id": job["id"], "e": _json(error)},
                 )
                 log.info("任务 %s 判失败：%s", str(job["uuid"])[:8], error.get("message"))
@@ -670,6 +786,7 @@ class QueueDispatcher:
         # 没有它产物就只是一堆文件，资产库与「这张图是谁的定妆照」再也对不上。
         tag: dict[str, Any] = (job.get("params") or {}).get("meta") or {}
         is_video = lambda name: str(name).lower().endswith((".mp4", ".webm", ".mov"))
+        is_audio = lambda name: str(name).lower().endswith((".mp3", ".wav", ".flac", ".ogg", ".m4a"))
         async with session_factory()() as s:
             for ref in refs or []:
                 data = await client.fetch_output(ref)
@@ -683,13 +800,30 @@ class QueueDispatcher:
                 dest = settings.media_root / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(data)
+                props = media_probe.probe(dest, data)
+                kind = ("video" if is_video(ref.filename)
+                        else "audio" if str(ref.filename).lower().endswith((".mp3", ".wav", ".flac", ".ogg", ".m4a"))
+                        else "image")
+                # 图片还要过一遍内容体检：宽高与字节数都对、但其实是雪花的情况，
+                # 只有看像素才看得出来（见 media_health）。判不过就不落库，任务直接失败。
+                if kind == "image":
+                    health = await asyncio.to_thread(
+                        media_health.image_health, dest, props.get("width"), props.get("height"))
+                    if health and not health["ok"]:
+                        dest.unlink(missing_ok=True)
+                        raise GenError(f"{ref.filename}：{health['why']}", kind="output_unhealthy")
                 m = Media(
                     project_key=job.get("project_key"),
-                    kind="video" if is_video(ref.filename) else "image",
-                    role=tag.get("role") or ("video" if is_video(ref.filename) else "output"),
+                    kind=kind,
+                    role=tag.get("role") or (kind if kind != "image" else "output"),
                     ref_id=tag.get("refId") or tag.get("ref_id"),
                     path=rel,
                     bytes_=len(data),
+                    mime=props.get("mime"),
+                    width=props.get("width"),
+                    height=props.get("height"),
+                    fps=props.get("fps"),
+                    duration_ms=props.get("duration_ms"),
                     origin={
                         "instance_id": instance_id,
                         "subfolder": ref.subfolder,

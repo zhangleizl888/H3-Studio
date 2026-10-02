@@ -59,9 +59,9 @@ def record(name: str, ok: bool, detail: str) -> None:
 
 
 def login(client: httpx.Client) -> dict[str, str]:
-    r = client.post(f"{BASE}/api/auth/login", json={"username": "admin", "password": "1234"})
+    r = client.post(f"{BASE}/api/auth/login", json={"username": "admin", "password": "12345"})
     if r.status_code >= 400:
-        raise SystemExit(f"登录失败（{r.status_code}）：{r.text[:200]}。先起后端并确认演示账号 admin/1234")
+        raise SystemExit(f"登录失败（{r.status_code}）：{r.text[:200]}。先起后端并确认演示账号 admin/12345")
     return {"Authorization": "Bearer " + r.json()["access"]}
 
 

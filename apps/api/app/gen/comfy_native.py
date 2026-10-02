@@ -18,7 +18,9 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 import httpx
 import websockets
 
+from .. import weights_health
 from ..logging_setup import get_logger, redact
+from ..net import async_client
 from .base import Capabilities, GenError, JobSnapshot, JobState, OutputRef, Progress, Submission
 
 log = get_logger("gen.comfy")
@@ -67,7 +69,8 @@ class ComfyNativeClient:
         # api_key 走 header 的还是走路径的，由调用方给的 base_url 决定；这里不猜
         self.base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self._client = httpx.AsyncClient(
+        self._client = async_client(
+            self.base_url,
             base_url=self.base_url,
             headers=self._headers,
             timeout=httpx.Timeout(timeout_s, connect=15.0, read=60.0),
@@ -75,6 +78,8 @@ class ComfyNativeClient:
         )
         self._ws_backoff_max = ws_backoff_max_s
         self._local_output_root = Path(local_output_root) if local_output_root else None
+        # 本机实例才做得成权重体检：ComfyUI 的 /models 只给文件名不给路径
+        self._models_root = weights_health.models_root(self._local_output_root)
         # 同一 clientId 重连会踢掉旧连接，所以每个 clientId 只允许一条 socket
         self._sockets: dict[str, websockets.ClientConnection] = {}
 
@@ -114,6 +119,22 @@ class ComfyNativeClient:
             free = dev.get("vram_free")
             if free:
                 return round(float(free) / 1024**3, 2)
+        return None
+
+    async def vram_detail(self) -> dict[str, float] | None:
+        """空闲 / 总额 / 本实例自己记在 torch 账上的显存（GiB），用来分辨「谁占着卡」。"""
+        try:
+            stats = await self.system_stats()
+        except Exception:
+            return None
+        for dev in stats.get("devices") or []:
+            if not dev.get("vram_free"):
+                continue
+            return {
+                "free_gb": round(float(dev["vram_free"]) / 1024**3, 2),
+                "total_gb": round(float(dev.get("vram_total") or 0) / 1024**3, 2),
+                "pool_gb": round(float(dev.get("torch_vram_total") or 0) / 1024**3, 2),
+            }
         return None
 
     async def queue_state(self) -> dict[str, Any]:
@@ -437,13 +458,36 @@ class ComfyNativeClient:
                         continue
                     choices = [c for c in spec[0] if isinstance(c, str)]
                     value = (node.get("inputs") or {}).get(field_name)
-                    if isinstance(value, str) and value and value not in choices:
+                    if not (isinstance(value, str) and value):
+                        continue
+                    if value not in choices:
                         hint = f"{class_type}.{field_name} 要的是 {value!r}，实例上没有"
                         near = _closest(value, choices)
                         if near:
                             hint += f"；最接近的可用文件是 {near!r}（大小写或后缀可能不同）"
                         missing.append(f"[{node_id}] {hint}")
+                        continue
+                    # 文件名在清单里 ≠ 这份权重能用：半截下载是「尺寸对、数据是零」，
+                    # 加载不报错，模型输出恒为 0，最后交出一张雪花还标成功（见 weights_health）。
+                    bad = await asyncio.to_thread(weights_health.check_weight_file, self._models_root, value)
+                    if bad:
+                        missing.append(f"[{node_id}] {class_type}.{field_name} {bad}")
         return missing
+
+    async def weight_file_problems(self, values: list[str]) -> list[str]:
+        """这几个文件名在这台机器的盘上是不是半截货。
+
+        工作流体检要单独问它一次：missing_models() 判的是「图里写死的值」，
+        而体检要判的是**换成绑定值之后**的那一份，那时候图还没改。
+        只有配了 output 目录的本机实例答得出（远端没有本地盘可看），其余返回空。
+        """
+        if not self._models_root:
+            return []
+        checked = sorted({str(v) for v in values if isinstance(v, str) and v.lower().endswith(".safetensors")})
+        problems = await asyncio.gather(
+            *(asyncio.to_thread(weights_health.check_weight_file, self._models_root, v) for v in checked)
+        )
+        return [f"{v}：{p}" for v, p in zip(checked, problems) if p]
 
     async def align_graph(self, graph: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
         """把图里写死的权重名换成本实例真实存在的文件。
@@ -606,10 +650,20 @@ def _families(tokens: set[str]) -> set[str]:
     return out
 
 
+def _is_vl(tokens: set[str]) -> bool:
+    """文件名有没有声明「这是带视觉塔的 VL 版」。
+
+    RH 的命名会把 vl 单独切成一个词（qwen3-vl-32b），本机实名是粘在一起的（qwen3vl_32b），
+    两种写法都要认出来。
+    """
+    return "vl" in tokens or any(t.endswith("vl") for t in tokens)
+
+
 def _same_model_family(wanted: str, candidate: str, *, mode: str | None = None) -> bool:
     """判断两个文件名是不是同一个模型的不同精度/打包档。
 
-    四条硬规则，全部来自本机踩过的坑：大族词必须一致（不许把 Qwen-Image 当 MiniMax H3）、
+    五条硬规则，全部来自本机踩过的坑：大族词必须一致（不许把 Qwen-Image 当 MiniMax H3）、
+    VL 与非 VL 互斥（qwen_3_8b 是纯语言模型，qwen3vl_8b 带视觉塔，架构不同）、
     模式词互斥且必须齐（fl2va 与 ref2va 不能互替，ref2v 的 LoRA 不能拿通用 turbo 冒充）、
     角色词互斥（视频 VAE ≠ 音频 VAE）、写明的规格词必须对上（32B 编码器 ≠ 8B 编码器）。
     两边一个共同词都没有就当不同模型。判不出来一律返回 False，
@@ -631,6 +685,10 @@ def _same_model_family(wanted: str, candidate: str, *, mode: str | None = None) 
     if cf and not wf:
         return False
     if not (w & c):
+        return False
+    # 2026-10-02 实测：Klein 9B 的图原本写着 qwen_3_8b，本机当时只有 qwen3vl_8b_bf16，
+    # 这条对齐把纯语言模型换成了带视觉塔的那个 —— 出图涂抹色散，但 ComfyUI 一声不响。
+    if _is_vl(w) != _is_vl(c):
         return False
     wg = {i for i, group in enumerate(_MODE_GROUPS) if w & group}
     cg = {i for i, group in enumerate(_MODE_GROUPS) if c & group}
@@ -710,9 +768,12 @@ def _outputs_from_history(entry: dict[str, Any]) -> list[OutputRef]:
                 )
     # 作者画布上的 PreviewImage 会一起进 history（type=temp）。有真正存盘产物时把它们剔掉：
     # 不然任务列表里会多出一张作者自己看的对照小图，用户以为是这次生成的东西。
-    saved = [r for r in out if r.type != "temp"]
-    return saved or out
-    return out
+    # LoadVideo/LoadImage 也会把自己读进去的那个文件以 type=input 原样报回来 ——
+    # 本机实测：全能参考任务的产物列表里混进一条和用户上传完全相同的 mp4。
+    real = [r for r in out if r.type == "output"]
+    if real:
+        return real
+    return [r for r in out if r.type != "temp"] or out
 
 
 def _extract_exec_error(messages: list[Any]) -> dict[str, Any]:

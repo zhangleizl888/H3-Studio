@@ -15,10 +15,29 @@ dependencies = [
   "argon2-cffi>=23.1",
   "pyjwt>=2.9",
   "python-multipart>=0.0.12",
+  # 智能体接入层：MCP SDK 与 CLI（h3）都要它
+  "mcp>=2,<3",
+  # app/crypto.py 直接 import Fernet，以前只靠传递依赖，冻结打包时会被「装了但没声明」绊一下
+  "cryptography>=42",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "aiosqlite>=23"]
+# 桌面形态（安装包装的那个 exe）才需要：内嵌 PostgreSQL 与进程/端口探测
+# pgserver 只发到 cp312，所以打包环境必须是 Python 3.12 —— scripts/build-win.ps1 里锁死
+desktop = ["pgserver>=0.1.4", "psutil>=5.9"]
+
+[project.scripts]
+h3 = "app.cli.main:main"
+h3-desktop = "app.desktop:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+# flat-layout 会自动往外找顶层包，alembic/ 与 scripts/ 会被一起收成包 —— 显式锁死
+[tool.setuptools]
+packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

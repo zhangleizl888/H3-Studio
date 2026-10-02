@@ -1,7 +1,7 @@
 """认证与用户路由。
 
 规则：口令只存 argon2id 哈希；首次启动没有 admin 时必须先建一个；
-弱口令拒绝；刷新令牌一次一换，二次使用即吊销全部会话。
+口令只卡「≥4 位 + 不在常见弱口令表」；刷新令牌一次一换，二次使用即吊销全部会话。
 """
 
 from __future__ import annotations
@@ -70,31 +70,52 @@ async def _audit(session: AsyncSession, *, user_id: int | None, actor: str | Non
     )
 
 
-async def seed_loopback_admin(session: AsyncSession, settings: Any) -> User | None:
-    """开源演示用的首个账号：库里一个用户都没有、且服务只监听环回时，建 admin / 1234。
+DEMO_USERNAME = "admin"
+DEMO_PASSWORD = "12345"
+# 历代演示口令。环回启动时如果演示账号还停在某一代演示口令上，就地升到 DEMO_PASSWORD ——
+# 只匹配这几个一次性口令，被人真正改过的口令碰不到；这样「默认口令」改版本后
+# 老库不用重建，README 的读者也不用先猜上一版是什么。
+LEGACY_DEMO_PASSWORDS = ("1234",)
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
-    1234 明显违反本模块的口令策略，这是有意的例外 —— 这个端口只有本机听得到，
-    而 README 的读者第一秒就该能进界面，而不是先被一个口令规则挡住。
+
+async def seed_loopback_admin(session: AsyncSession, settings: Any) -> User | None:
+    """开源演示用的首个账号：库里一个用户都没有、且服务只监听环回时，建 admin / 12345。
+
     只要 host 不是环回（真要给一个团队用），这里什么都不做，必须由人显式 bootstrap。
+    库里已经有账号时只做一件事：把还停在旧演示口令上的演示 admin 升到当前演示口令。
     """
     from sqlalchemy import func as sa_func
 
-    if await session.scalar(select(sa_func.count()).select_from(User)):
+    if settings.host not in LOOPBACK_HOSTS:
+        if not await session.scalar(select(sa_func.count()).select_from(User)):
+            log.warning("库里没有账号，但服务监听在 %s（不是环回）：不自动创建演示管理员，请调 POST /api/auth/bootstrap", settings.host)
         return None
-    if settings.host not in {"127.0.0.1", "localhost", "::1"}:
-        log.warning("库里没有账号，但服务监听在 %s（不是环回）：不自动创建弱口令管理员，请调 POST /api/auth/bootstrap", settings.host)
+
+    if not await session.scalar(select(sa_func.count()).select_from(User)):
+        admin = User(
+            username=DEMO_USERNAME,
+            display_name="管理员",
+            password_hash=hash_password(DEMO_PASSWORD),
+            role=Role.admin,
+        )
+        session.add(admin)
+        await session.commit()
+        await session.refresh(admin)
+        log.warning("已创建演示账号 %s / %s（仅环回）。给团队用之前请改口令并关掉自动登录。", DEMO_USERNAME, DEMO_PASSWORD)
+        return admin
+
+    admin = await session.scalar(select(User).where(User.username == DEMO_USERNAME))
+    if admin is None:
         return None
-    admin = User(
-        username="admin",
-        display_name="管理员",
-        password_hash=hash_password("1234", enforce_policy=False),
-        role=Role.admin,
-    )
-    session.add(admin)
-    await session.commit()
-    await session.refresh(admin)
-    log.warning("已创建演示账号 admin / 1234（仅环回）。给团队用之前请改口令并关掉自动登录。")
-    return admin
+    for stale in LEGACY_DEMO_PASSWORDS:
+        if verify_password(admin.password_hash, stale):
+            admin.password_hash = hash_password(DEMO_PASSWORD)
+            await session.commit()
+            await session.refresh(admin)
+            log.warning("演示账号 %s 还停在旧演示口令 %s 上，已升到 %s（仅环回）。", DEMO_USERNAME, stale, DEMO_PASSWORD)
+            return admin
+    return None
 
 
 @router.get("/auth/setup-required")
@@ -190,6 +211,52 @@ async def logout(body: dict[str, str], session: AsyncSession = Depends(get_sessi
 @router.get("/auth/me")
 async def me(user: User = Depends(current_user)) -> dict[str, Any]:
     return _user_dict(user)
+
+
+class ChangePasswordBody(BaseModel):
+    currentPassword: str = Field(min_length=1, max_length=256)
+    newPassword: str = Field(min_length=1, max_length=256)
+
+
+@router.post("/auth/change-password")
+async def change_password(
+    body: ChangePasswordBody,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """改自己的口令：先验当前口令，换完哈希把这个账号的浏览器会话全部吊销。
+
+    改完必须重新登录是刻意的 —— JWT 里查不到浏览器手上那张 refresh token，
+    做不到「只踢别人、留自己」。agent token 不动：那是显式发出去的长期钥匙，
+    改口令不该把接在上面的智能体和 CLI 一起踢下线。
+    """
+    if not verify_password(user.password_hash, body.currentPassword):
+        await _audit(session, user_id=user.id, actor=user.username, action="auth.password_change_failed", target=f"user:{user.id}", request=request)
+        await session.commit()
+        raise HTTPException(401, "当前口令不正确")
+    if body.newPassword == body.currentPassword:
+        raise HTTPException(422, "新口令和当前口令一样")
+    try:
+        user.password_hash = hash_password(body.newPassword)
+    except WeakPassword as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    from datetime import datetime, timezone
+
+    from ..models import RefreshToken
+
+    revoked = (
+        await session.execute(
+            RefreshToken.__table__.update()
+            .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(timezone.utc))
+        )
+    ).rowcount
+    await _audit(session, user_id=user.id, actor=user.username, action="auth.password_changed", target=f"user:{user.id}", request=request, detail={"sessionsRevoked": revoked})
+    await session.commit()
+    log.info("口令已更新：user=%s，吊销会话 %s 条（agent token 未动）", user.username, revoked)
+    return {"ok": True, "sessionsRevoked": revoked}
 
 
 class UserCreate(BaseModel):

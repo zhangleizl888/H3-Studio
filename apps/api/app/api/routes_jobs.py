@@ -73,8 +73,14 @@ class JobCreate(CamelModel):
     project_key: str | None = Field(None, max_length=64, description="前端 IndexedDB 里的项目 id")
     workflow_id: int | None = None
     priority: int = Field(100, ge=0, le=999)
+    # 模型覆盖：{"127.unet_name": "MiniMax_H3_...safetensors"}。值必须是那台实例真报出来的文件名，
+    # 服务端一律不做就近凑匹配（见 gen/model_slots.py 的来历）。
+    models: dict[str, str] | None = None
     # {"role":"character_ref","refId":"char-3"} —— 产物落库时打成这个标签，资产库才认得出是谁的图
     meta: dict[str, Any] | None = None
+    # 技能库里的 id（数字）。正文由服务端读出来并进这次提交的提示词槽 ——
+    # 前端只交 id，所以改了技能不需要回去重存每个角色/镜头。
+    skill_ids: list[str] | None = Field(None, max_length=20)
 
 
 class JobBatchCreate(CamelModel):
@@ -132,11 +138,45 @@ async def _plan_for(request: Request, session, items: list[JobCreate]) -> list[d
     return out["rows"]
 
 
+async def _apply_skills(request: Request, session, items: list[JobCreate]) -> None:
+    """把选中的技能并进这次任务的提示词槽（就地改 body.slots）。
+
+    为什么在服务端并：技能是随时可改的库内容，前端把正文拼进 prompt 再存回 IndexedDB，
+    等于改一次技能要重存所有角色与镜头。三个入口（/jobs、/jobs/batch、/jobs/plan）都在
+    这里过一次，所以参数表显示的就是真提交的那串 —— 预览和派发不是两套账。
+
+    续拍那条没有 slots.prompt（每段各有一句）：并进**链尾那一段**，因为那才是本镜头；
+    前面的段落已经跑进 latent 存档，改它等于换了一条链。
+    """
+    if not any(i.skill_ids for i in items):
+        return
+    if not _has_db(request):
+        raise _bad_request("技能库要连数据库才用得上（当前是无库模式）")
+    from .routes_skills import resolve_block
+
+    for item in items:
+        if not item.skill_ids:
+            continue
+        block, names = await resolve_block(session, item.skill_ids, for_model=False)
+        slots = item.slots or {}
+        prompt = slots.get("prompt")
+        if isinstance(prompt, str):
+            slots["prompt"] = f"{prompt.rstrip()}\n\n{block}" if prompt.strip() else block
+        else:
+            segments = slots.get("segments")
+            if isinstance(segments, list) and segments and isinstance(segments[-1], dict) and isinstance(segments[-1].get("prompt"), str):
+                text = str(segments[-1]["prompt"])
+                segments[-1]["prompt"] = f"{text.rstrip()}\n\n{block}" if text.strip() else block
+        item.slots = slots
+        item.meta = {**(item.meta or {}), "skillIds": [str(x) for x in item.skill_ids], "skillNames": names}
+
+
 @router.post("/jobs/plan")
 async def plan_jobs_endpoint(
     body: JobBatchCreate, request: Request, _: Any = Depends(login_gate), session=Depends(get_session)
 ) -> dict[str, Any]:
     """派发前的参数确认表：逐条参数、问题清单、耗时外推。只读，不入队、不写库。"""
+    await _apply_skills(request, session, body.jobs)
     rows = await _plan_for(request, session, body.jobs)
     eta = sum(int((r.get("derived") or {}).get("etaSeconds") or 0) for r in rows)
     blocked = sum(1 for r in rows if r.get("blocked"))
@@ -172,6 +212,9 @@ def _job_body_to_params(body: JobCreate) -> dict[str, Any]:
     选择要读库、要问实例在哪儿，那些都在异步侧，不该塞进这个纯函数里。
     """
     params: dict[str, Any] = {"meta": body.meta or {}}
+    if body.models:
+        # 空值一律丢掉：前端「跟随默认」那档就是空串，留着会在填图时覆盖成无效文件名
+        params["models"] = {str(k): str(v) for k, v in body.models.items() if str(v or "").strip()}
     if body.graph:
         params["graph"] = body.graph
         if body.workflow_id:
@@ -191,6 +234,31 @@ def _job_body_to_params(body: JobCreate) -> dict[str, Any]:
         raise _bad_request(f"没有生成模板 {body.template}（可用：{'、'.join(TEMPLATES)}）")
     params.update({"template": body.template, "slots": body.slots or {}})
     return params
+
+
+async def _class_map(request: Request, session, body: JobCreate, params: dict[str, Any]) -> dict[str, str] | None:
+    """节点号 → class_type，只为入队前的模型覆盖校验服务。
+
+    三条路各有各的出处：直接给图看图本身，指定工作流看库里那条的 graph，内置模板看
+    model_slots 里那份写死的声明。都拿不到就返回 None —— 队列建图时会再判一次，
+    这里不做「猜不到就放行」的宽松处理，而是干脆不多查一趟。
+    """
+    graph = body.graph or params.get("graph")
+    if isinstance(graph, dict) and graph:
+        return {str(k): str((v or {}).get("class_type") or "") for k, v in graph.items()}
+    wf_id = params.get("workflow_id") or body.workflow_id
+    if wf_id and _has_db(request):
+        from ..models import Workflow
+
+        row = await session.get(Workflow, int(wf_id))
+        if row is not None:
+            return {str(k): str((v or {}).get("class_type") or "") for k, v in (row.graph or {}).items()}
+    key = params.get("template")
+    if key:
+        from ..gen.model_slots import BUILTIN_MODEL_LOADERS
+
+        return {node: ct for node, ct, _field, _label in BUILTIN_MODEL_LOADERS.get(str(key), [])}
+    return None
 
 
 async def _enqueue(request: Request, session, actor: Any, body: JobCreate, *, checked: bool = False,
@@ -227,6 +295,31 @@ async def _enqueue(request: Request, session, actor: Any, body: JobCreate, *, ch
             params.setdefault("workflowName", derived.get("workflowName"))
             params.setdefault("chosenBy", derived.get("chosenBy") or "手动指定")
         params.setdefault("meta", {})["planProblems"] = plan_row.get("problems") or []
+    # 库绑定与任务显式选择要一起验：只验 params["models"] 的话，「这台没有那个权重」
+    # 会到派发时才炸，而用户在点下按钮的那一秒就该知道。两者谁赢只有一处算法。
+    from ..workflow_bindings import load as load_binding, merge as merge_bindings, ref_for
+
+    ref = ref_for(params.get("workflow_id"), params.get("template"))
+    binding = await load_binding(session, ref, instance_id) if ref and _has_db(request) else {}
+    if binding:
+        # 分开存：任务详情里要看得出哪几项是库里这台机器的默认、哪几项是这次临时挑的
+        params["bindingModels"] = binding
+    effective_models = merge_bindings(binding, params.get("models") or {})
+    if effective_models:
+        # 换模型这件事要在点下按钮时就答得上来：等队列建完图再报，用户看到的只是
+        # 一个失败任务，而「这台实例没有这个权重」其实是入队前就能查清的。
+        try:
+            client = _registry(request).client(instance_id)
+        except (KeyError, NotImplementedError) as exc:
+            raise _bad_request(str(exc)) from exc
+        cmap = await _class_map(request, session, body, params)
+        if cmap is not None:
+            from ..gen.model_slots import validate as validate_models
+
+            try:
+                await validate_models(client, cmap, effective_models, where=f"实例 {instance_id}")
+            except GenError as exc:
+                raise _bad_request(redact(exc.message)) from exc
     if params.get("graph"):
         try:
             client = _registry(request).client(instance_id)
@@ -273,6 +366,7 @@ async def create_jobs(body: JobBatchCreate, request: Request, actor: Any = Depen
     派发前先过一遍参数表（和 /jobs/plan 同一套判断）：被拦下的那条不进队列，
     原因逐条回给前端，不让它变成十几分钟后一条 ComfyUI 报错。
     """
+    await _apply_skills(request, session, body.jobs)
     rows = await _plan_for(request, session, body.jobs)
     outs = []
     errors = []
@@ -301,6 +395,8 @@ def _job_out(job: Job, media_ids: list[int] | None = None) -> dict[str, Any]:
         # 填图说明（哪张素材接到了哪个加载器、哪个分支被撤掉）是排查「出图和给的素材对不上」
         # 时唯一有用的信息，但整张 graph 太大不能塞进列表返回，所以只把这几行话带出去。
         "fillNotes": fill.get("fillNotes") or [],
+        # 换过的权重同样只带话不带图：用户要能确认「我选的那颗真的上去了」
+        "modelNotes": fill.get("modelNotes") or [],
         "id": job.uuid,
         "jobId": job.uuid,
         "promptId": job.prompt_id,
@@ -330,6 +426,7 @@ async def create_job(
     body: JobCreate, request: Request, actor: Any = Depends(dispatch_gate), session=Depends(get_session)
 ) -> dict[str, Any]:
     """入队（有库）或直投（无库）。见 JobCreate：graph 与 template 二选一。"""
+    await _apply_skills(request, session, [body])
     return await _enqueue(request, session, actor, body)
 
 
@@ -586,6 +683,20 @@ async def retry_job(
         {"id": row.id},
     )
     await session.execute(text("DELETE FROM instance_locks WHERE job_id=:j"), {"j": row.id})
+    # 带槽位的工作流任务：把上次填好的图丢掉，让这一轮重新填。
+    # `_run` 是「params.graph 优先，其次才按 template/workflow_id 现填」，所以重试会原封不动复用旧图
+    # —— 用户改完工作流（或后端修了填图）再点重试，看到的还是上一次那张坏图，报同一个错，像重试没用。
+    # 直投那条（工作流页试运行）没有 slots，仍然提交用户手改的图。
+    await session.execute(
+        text(
+            """
+            UPDATE jobs SET params = params - 'graph'
+             WHERE id=:id AND params IS NOT NULL
+               AND params->>'slots' IS NOT NULL AND params->>'workflow_id' IS NOT NULL
+            """
+        ),
+        {"id": row.id},
+    )
     await session.commit()
     await session.refresh(row)
     from .routes_auth import _audit
@@ -710,7 +821,14 @@ async def upload_media(
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
 
-    kind = "video" if suffix in (".mp4", ".webm", ".mov") else "image"
+    kind = ("video" if suffix in (".mp4", ".webm", ".mov")
+            else "audio" if suffix in (".mp3", ".wav", ".flac", ".ogg", ".m4a")
+            else "image")
+    # 上传的素材和渲染产物走同一套元数据探测：浏览器给的 content_type 经常是
+    # application/octet-stream（拖进来的文件），宽高/时长不探就永远是 NULL
+    from .. import media_probe
+
+    props = media_probe.probe(dest, data)
     row = Media(
         uuid=key,
         project_key=project_key,
@@ -720,7 +838,11 @@ async def upload_media(
         ref_id=ref_id,
         path=rel,
         bytes_=len(data),
-        mime=file.content_type or "application/octet-stream",
+        mime=props.get("mime") or file.content_type or "application/octet-stream",
+        width=props.get("width"),
+        height=props.get("height"),
+        fps=props.get("fps"),
+        duration_ms=props.get("duration_ms"),
         origin={"source": "upload", "filename": file.filename},
     )
     session.add(row)

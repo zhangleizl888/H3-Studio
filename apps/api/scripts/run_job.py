@@ -41,11 +41,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=BASE)
     ap.add_argument("--username", default="admin")
-    ap.add_argument("--password", default="1234")
+    ap.add_argument("--password", default="12345")
     ap.add_argument("--kind", default="video", choices=["image", "video", "audio", "workflow_test"])
     ap.add_argument("--slots", default="{}", help="信号写法的槽位 JSON")
     ap.add_argument("--workflow", default=None, help="指定工作流库 id（不给就是自动选）")
     ap.add_argument("--instance", default=None)
+    ap.add_argument("--models", default=None, help='换权重，JSON 对象：{"节点号.字段名": "实例上的文件名"}')
     ap.add_argument("--title", default="验收跑")
     ap.add_argument("--wait", type=int, default=3600, help="最多等多少秒")
     args = ap.parse_args()
@@ -61,12 +62,16 @@ def main() -> int:
         body["workflowId"] = int(args.workflow)
     if args.instance:
         body["instanceId"] = args.instance
+    if args.models:
+        body["models"] = json.loads(args.models)
 
     _, plan = call(args.base, "/api/jobs/plan", token=token, body={"jobs": [body]}, method="POST")
     row = (plan or {}).get("rows", [{}])[0]
     d = row.get("derived") or {}
     print(f"参数表：命中={d.get('workflowName') or row.get('template')}（{d.get('chosenBy')}） "
           f"尺寸={d.get('width')}×{d.get('height')} 帧={d.get('frames')} 步={d.get('steps')} 预估={d.get('etaSeconds')}s")
+    if d.get("modelOverrides"):
+        print("   换权重:", " / ".join(d["modelOverrides"]))
     for p in row.get("problems") or []:
         print("   问题:", p)
     if row.get("blocked"):
@@ -103,6 +108,9 @@ def main() -> int:
             notes = j.get("fillNotes") or fill.get("fillNotes")
             if notes:
                 print("  填图:", " / ".join(notes)[:400])
+            model_notes = j.get("modelNotes") or fill.get("modelNotes")
+            if model_notes:
+                print("  权重:", " / ".join(model_notes)[:400])
             return 0 if j.get("state") == "succeeded" else 1
     print(f"等了 {args.wait}s 还没到终态（任务 {jid} 还在跑，可用 /api/jobs/{jid} 继续看）")
     return 3

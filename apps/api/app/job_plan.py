@@ -432,8 +432,15 @@ def plan_item(index: int, item: dict[str, Any], *, instances: dict[str, Instance
 
 def plan_jobs(items: list[dict[str, Any]], *, instances: dict[str, InstanceInfo], known_media: set[int] | None,
               workflows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    rows = [plan_item(i, it, instances=instances, known_media=known_media, workflows=workflows)
-            for i, it in enumerate(items)]
+    rows = []
+    for i, it in enumerate(items):
+        r = plan_item(i, it, instances=instances, known_media=known_media, workflows=workflows)
+        # 换过的权重要在参数表上看得见。这里只回显用户点了什么 —— 「那个文件在这台实例上
+        # 到底有没有」要问实例，参数表是纯函数不联网，那一层拦在 _enqueue。
+        models = it.get("models") or {}
+        if models:
+            r.derived["modelOverrides"] = [f"{k} ← {v}" for k, v in models.items()]
+        rows.append(r)
     # 被拦下的那条不会进队列，所以它的"耗时"不该算进总额
     eta = sum(int(r.derived.get("etaSeconds") or 0) for r in rows if not r.blocked)
     return {

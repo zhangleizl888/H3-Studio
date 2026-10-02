@@ -353,6 +353,45 @@ async def probe_instance(instance_id: str, request: Request, _: Any = Depends(lo
     return report
 
 
+@router.post("/instances/{instance_id}/ping")
+async def ping_instance(instance_id: str, request: Request, _: Any = Depends(login_gate)) -> dict[str, Any]:
+    """轻量在线探测：只打 `/system_stats` 与 `/queue`。
+
+    和探活（/probe）的分工要说清楚：完整探活要拉一次全量 /object_info（本机约 30MB），
+    管理页每 10 秒刷一次在线状态要是走那条，实例正在出片时就是自己把自己的读请求挤断。
+    所以这里只更新 last_probe_at / last_probe_ok / last_error 三列，
+    **不动 capabilities** —— 那份是完整探活的成果，不能被半个数据盖成缺节点。
+    """
+    registry = request.app.state.registry
+    try:
+        client = registry.client(instance_id)
+    except (KeyError, NotImplementedError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not hasattr(client, "system_stats"):
+        raise HTTPException(400, f"实例 {instance_id} 的协议没有轻量探测口，请用「测试连接」")
+    ok = False
+    error: str | None = None
+    running = queued = 0
+    try:
+        await client.system_stats()
+        queue = await client.queue_state()
+        running = len(queue.get("queue_running") or [])
+        queued = len(queue.get("queue_pending") or [])
+        ok = True
+    except Exception as exc:
+        error = redact(str(exc))[:200] or type(exc).__name__
+    if request.app.state.settings.database_url and instance_id.isdigit():
+        async with session_factory()() as s:
+            await s.execute(
+                text(
+                    "UPDATE gen_instances SET last_probe_at=now(), last_probe_ok=:ok, last_error=:err WHERE id=:id"
+                ),
+                {"id": int(instance_id), "ok": ok, "err": None if ok else error},
+            )
+            await s.commit()
+    return {"ok": ok, "instanceId": instance_id, "running": running, "queued": queued, "error": error}
+
+
 class DryProbeBody(CamelModel):
     protocol: Literal["comfy_native", "rh_task"] = "comfy_native"
     base_url: str

@@ -62,7 +62,7 @@ async def test_bootstrap_only_once(client):
 
 async def test_weak_password_rejected_at_bootstrap(client):
     r = await client.post("/api/auth/bootstrap", json={"username": "admin", "password": "abc"})
-    assert r.status_code == 422 and "10 位" in r.json()["detail"]
+    assert r.status_code == 422 and "4 位" in r.json()["detail"]
     # 被拒的口令不能留下半个账号
     assert (await client.get("/api/auth/setup-required")).json()["needed"] is True
 
@@ -96,6 +96,44 @@ async def test_refresh_rotates_and_reuse_revokes_all_sessions(client):
 
     r3 = await client.post("/api/auth/refresh", json={"refresh": r1.json()["refresh"]})
     assert r3.status_code == 401, "全部会话应已吊销"
+
+
+async def test_change_password_verifies_current_and_revokes_sessions(client):
+    """自助改口令要同时做到：先验当前口令、拒绝时不改库、成功后浏览器会话全部作废。"""
+    s0 = await _bootstrap(client, "admin", "a-x9kQ2!mn-pass")
+    hdr = {"Authorization": f"Bearer {s0['access']}"}
+
+    wrong = await client.post(
+        "/api/auth/change-password", headers=hdr, json={"currentPassword": "nope-pass-1", "newPassword": "n3w-pass-x"}
+    )
+    assert wrong.status_code == 401 and "当前口令" in wrong.json()["detail"], wrong.text
+    assert (await client.post("/api/auth/login", json={"username": "admin", "password": "a-x9kQ2!mn-pass"})).status_code == 200, "验口令失败不该留下半个改动"
+
+    ok = await client.post(
+        "/api/auth/change-password", headers=hdr, json={"currentPassword": "a-x9kQ2!mn-pass", "newPassword": "12345"}
+    )
+    assert ok.status_code == 200 and ok.json()["sessionsRevoked"] >= 1, ok.text
+
+    assert (await client.post("/api/auth/refresh", json={"refresh": s0["refresh"]})).status_code == 401, "改过口令后刷新令牌要全部作废"
+    assert (await client.post("/api/auth/login", json={"username": "admin", "password": "a-x9kQ2!mn-pass"})).status_code == 401
+    assert (await client.post("/api/auth/login", json={"username": "admin", "password": "12345"})).status_code == 200
+
+
+async def test_change_password_rejects_same_or_weak(client):
+    s0 = await _bootstrap(client, "admin", "a-x9kQ2!mn-pass")
+    hdr = {"Authorization": f"Bearer {s0['access']}"}
+
+    same = await client.post(
+        "/api/auth/change-password", headers=hdr, json={"currentPassword": "a-x9kQ2!mn-pass", "newPassword": "a-x9kQ2!mn-pass"}
+    )
+    assert same.status_code == 422 and "一样" in same.json()["detail"], same.text
+
+    short = await client.post(
+        "/api/auth/change-password", headers=hdr, json={"currentPassword": "a-x9kQ2!mn-pass", "newPassword": "abc"}
+    )
+    assert short.status_code == 422 and "4 位" in short.json()["detail"], short.text
+
+    assert (await client.post("/api/auth/login", json={"username": "admin", "password": "a-x9kQ2!mn-pass"})).status_code == 200, "被拒的两次都不该动到口令"
 
 
 async def test_deactivated_user_loses_access(client):

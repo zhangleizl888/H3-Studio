@@ -44,7 +44,8 @@ class Task:
             media[key] = [int(i) for i in ids if str(i).isdigit()]
         params_out = {k: v for k, v in slots.items()
                       if k in ("seconds", "frames", "steps", "width", "height", "seed", "cfg", "denoise",
-                               "turbo", "aspect_ratio", "megapixels")}
+                               "turbo", "aspect_ratio", "megapixels", "language", "ref_text", "temperature",
+                               "x_vector_only")}
         return cls(kind=str(params.get("kind") or "video"), prompt=str(slots.get("prompt") or ""),
                    negative_prompt=str(slots.get("negative_prompt") or ""), media=media, params=params_out,
                    placement=str(params.get("instance_placement") or "local"))
@@ -134,6 +135,15 @@ def rank(rows: list[dict[str, Any]], task: Task, *, limit: int = 5) -> list[Scor
         if missing:
             reasons.append("缺必填输入：" + "、".join(missing))
             continue
+        # 素材驱动的工作流一条素材都没收到时，图上那些 LoadImage/LoadVideo 会留着模板作者的
+        # 默认文件跑完 —— 用户点「文生图」拿到的却是别人那张照片的设定图。这类任务该回落到
+        # 真正不需要素材的内置模板，而不是靠扣分侥幸排到最后。
+        given_media = {k for k, v in task.media.items() if v}
+        wants_media = any(s.get("type") in ("image", "video", "audio") for s in signals.values()) or bool(
+            row.get("pending_media"))
+        if wants_media and not given_media:
+            reasons.append("这条要素材驱动，本次任务什么都没给（会用图里残留的作者默认文件）")
+            continue
         score = 0
         consumed = [n for n in provided if n in signals]
         score += 3 * len(consumed)
@@ -185,6 +195,29 @@ def _required_inputs(object_info: dict[str, Any], class_type: str) -> set[str]:
     return set(((object_info.get(class_type) or {}).get("input") or {}).get("required", {}) or {})
 
 
+def _renumber_group(ins: dict[str, Any], base: str, lost_index: int) -> None:
+    """autogrow 组被剪掉一路素材后把号位压实，保住组的最小白点。
+
+    `images.image0/image1` 这种展平写法，ComfyUI 校验的是**从组原有最小白点起连续**的号位：
+    剪掉 image0 只剩 image1，组里看着还有东西，提交却以「节点 81：Required input is missing」退回
+    （本机 Klein 人物设定图在无参考图时就是这么全军覆没的）。
+    """
+    pat = re.compile(rf"^{re.escape(base)}\.([a-zA-Z_]*?)(\d+)$")
+    members: list[tuple[str, int, Any]] = []
+    for k in list(ins):
+        m = pat.match(k)
+        if m:
+            members.append((k, int(m.group(2)), ins[k]))
+    if not members:
+        return
+    floor = min(min(idx for _, idx, _ in members), lost_index)
+    prefix = pat.match(members[0][0]).group(1)
+    for k, _, v in members:
+        ins.pop(k, None)
+    for i, (_, _, v) in enumerate(sorted(members, key=lambda x: x[1])):
+        ins[f"{base}.{prefix}{floor + i}"] = v
+
+
 def _drop_node(graph: dict[str, Any], nid: str, notes: list[str], object_info: dict[str, Any],
                dropped: set[str] | None = None) -> None:
     """删掉一个节点，并把「因此缺了必填输入」的下游一起删掉。
@@ -217,6 +250,10 @@ def _drop_node(graph: dict[str, Any], nid: str, notes: list[str], object_info: d
                     if not val:
                         ins.pop(fname, None)
                 base = fname.split(".", 1)[0]
+                # 剪的是 autogrow 组里的一路素材：先把剩下的号位压实，别让组中间出现空洞
+                m_idx = re.match(r"^[A-Za-z_]*(\d+)$", fname.split(".", 1)[1] if "." in fname else "")
+                if m_idx and any(str(k).split(".", 1)[0] == base for k in ins):
+                    _renumber_group(ins, base, int(m_idx.group(1)))
                 if base not in _required_inputs(object_info, cnd.get("class_type") or ""):
                     continue
                 # autogrow 素材组在 required 里是整组必填，但少一路素材是正常事：
@@ -226,6 +263,39 @@ def _drop_node(graph: dict[str, Any], nid: str, notes: list[str], object_info: d
                     continue
                 stack.append(cnid)
         notes.append(f"撤掉 #{cur}（{nd.get('class_type')}）")
+
+
+def _add_node(graph: dict[str, Any], class_type: str, inputs: dict[str, Any], title: str) -> str:
+    nums = [int(k) for k in graph if str(k).isdigit()]
+    nid = str(max(nums, default=0) + 1)
+    graph[nid] = {"class_type": class_type, "inputs": inputs, "_meta": {"title": title}}
+    return nid
+
+
+def _attach_media(graph: dict[str, Any], addr: str, sig_type: str, name: str, notes: list[str],
+                  object_info: dict[str, Any], dropped: set[str], index: int, label: str) -> None:
+    """把一份素材接到「消费节点上的组位」：插加载节点，再把组位改成连线。
+
+    参考视频要的是帧，所以得像导入时那样 LoadVideo → GetVideoComponents(0)，
+    音轨（出口 1）留给 ref_video_audios 那一路用；直接写文件名会被 ComfyUI 退回。
+    """
+    nid, _, fld = str(addr).partition(".")
+    nd = graph.get(nid)
+    if nd is None:
+        return
+    prev = (nd.get("inputs") or {}).get(fld)
+    if sig_type == "video":
+        load = _add_node(graph, "LoadVideo", {"file": name}, f"参考视频 {index}")
+        gvc = _add_node(graph, "GetVideoComponents", {"video": [load, 0]}, "拆出帧与音轨")
+        ref, kind_note = [gvc, 0], "帧"
+    elif sig_type == "audio":
+        ref, kind_note = [_add_node(graph, "LoadAudio", {"audio": name}, f"参考音频 {index}"), 0], "音频"
+    else:
+        ref, kind_note = [_add_node(graph, "LoadImage", {"image": name}, f"参考图 {index}"), 0], "图"
+    nd.setdefault("inputs", {})[fld] = ref
+    notes.append(f"{label} 第 {index} 个 ← {name}（{kind_note}，新增加载节点）")
+    if isinstance(prev, list) and len(prev) == 2 and not _has_consumer(graph, str(prev[0])):
+        _drop_node(graph, str(prev[0]), notes, object_info, dropped)
 
 
 async def prepare(row: dict[str, Any], task: Task, *, ctx: Any,
@@ -288,6 +358,14 @@ async def prepare(row: dict[str, Any], task: Task, *, ctx: Any,
         for i, addr in enumerate(addrs):
             if i < len(ids):
                 name = await ctx.to_input(int(ids[i]))
+                nid, _, fld = str(addr).partition(".")
+                if "." in fld and (graph.get(nid) or {}).get("inputs", {}).get(fld) is not None:
+                    # 素材挂在消费节点的组位上（136.ref_audios.ref_audio_0）：这一位要的是
+                    # AUDIO/IMAGE 数据流，写文件名进去提交就会被退回，所以插一个加载节点接上。
+                    # 「全能参考吃任务给的音色」走的就是这条路。
+                    _attach_media(graph, addr, sig["type"], name, notes, object_info, dropped, i + 1,
+                                  str(sig.get("label") or sig["name"]))
+                    continue
                 set_addr(addr, name)
                 notes.append(f"{sig.get('label')} 第 {i + 1} 个 ← {name}")
             else:

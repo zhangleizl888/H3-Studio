@@ -72,10 +72,11 @@ async def main() -> int:
         access = r.json()["access"]
         auth = bearer(access)
 
-        # 2) 弱口令必须被拒
-        weak = await c.post("/api/users", headers=auth, json={"username": "weakling", "displayName": "弱", "role": "editor", "password": "1234567890"})
-        assert weak.status_code == 422, weak.text
-        say(f"弱口令被拒（422）：{weak.json()['detail']}")
+        # 2) 口令门槛的两条都要拦：长度不足、命中常见弱口令表
+        for bad in ("abc", "1234567890"):
+            weak = await c.post("/api/users", headers=auth, json={"username": "weakling", "displayName": "弱", "role": "editor", "password": bad})
+            assert weak.status_code == 422, f"{bad} 竟然被收下了：{weak.text}"
+            say(f"口令「{bad}」被拒（422）：{weak.json()['detail']}")
 
         # 3) 建 editor / viewer
         for (name, pwd), role in ((EDITOR, "editor"), (VIEWER, "viewer")):

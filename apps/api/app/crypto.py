@@ -16,7 +16,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from .config import get_settings
+from . import runtime
 from .logging_setup import get_logger
 
 log = get_logger("crypto")
@@ -24,7 +24,11 @@ log = get_logger("crypto")
 
 @lru_cache
 def _key_path() -> Path:
-    return Path(os.environ.get("H3_SECRET_FILE") or (Path(__file__).resolve().parents[1] / ".secret.key"))
+    """密钥文件位置交给 runtime：桌面态在用户数据目录，开发态仍是 apps/api/.secret.key。
+
+    开发态那条不能挪 —— 挪了等于换了 Fernet 钥匙，库里已加密的实例 apiKey 全解不开。
+    """
+    return runtime.secret_path()
 
 
 def _fernet() -> Fernet:
@@ -35,6 +39,7 @@ def _fernet() -> Fernet:
     if path.exists():
         return Fernet(path.read_bytes())
     key = Fernet.generate_key()
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(key)
     try:
         os.chmod(path, 0o600)
@@ -50,6 +55,7 @@ def load_or_create_secret(name: str) -> bytes:
     if path.exists():
         return path.read_bytes().strip()
     value = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(value)
     try:
         os.chmod(path, 0o600)

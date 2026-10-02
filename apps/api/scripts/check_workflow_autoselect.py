@@ -1,7 +1,7 @@
 r"""按任务自动选工作流的验收脚本（打真接口，不连库）。
 
     PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe scripts/check_workflow_autoselect.py
-        --base http://127.0.0.1:8788 --username admin --password 1234
+        --base http://127.0.0.1:8788 --username admin --password 12345
 
 三步：① 工作流库现在长什么样；② 三种任务分别会挑中谁（含没挑中时的回落说明）；
 ③ 挑完之后的参数表（尺寸换算、耗时外推、被显存闸门拦住的那类）。
@@ -46,7 +46,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=BASE)
     ap.add_argument("--username", default="admin")
-    ap.add_argument("--password", default="1234")
+    ap.add_argument("--password", default="12345")
     ap.add_argument("--run", action="store_true", help="真入队跑一条（会占显存几分钟）")
     ap.add_argument("--first-frame", type=int, default=75, help="用来填首帧的 media id")
     ap.add_argument("--last-frame", type=int, default=74)

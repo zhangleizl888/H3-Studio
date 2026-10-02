@@ -23,9 +23,8 @@ import sys
 import time
 from typing import Any
 
-import httpx
-
 from .logging_setup import get_logger, redact
+from .net import async_client
 
 log = get_logger("gpu.arbiter")
 
@@ -107,7 +106,7 @@ def _wait_port_gone(port: int, timeout: float) -> bool:
 
 async def _port_alive(port: int) -> bool:
     try:
-        async with httpx.AsyncClient(timeout=2.0) as c:
+        async with async_client(f"http://127.0.0.1:{port}/v1/models", timeout=2.0) as c:
             await c.get(f"http://127.0.0.1:{port}/v1/models")
         return True
     except Exception:
@@ -151,9 +150,10 @@ class GpuArbiter:
             self.last_error = f"端口 {port} 上的进程不是本地推理服务，拒绝停它：{cmd[:120]}"
             log.warning("%s", self.last_error)
             return None
-        ok = await asyncio.to_thread(_run, ["taskkill", "/PID", str(pid), "/F"])
+        # macOS/Linux 上没有 taskkill；先 TERM 让它自己落盘，等不到再 KILL
+        killed = await asyncio.to_thread(self._terminate, pid)
         gone = await asyncio.to_thread(_wait_port_gone, port, 15.0)
-        self.stopped = {"port": port, "pid": pid, "cmdline": cmd, "at": time.time(), "reason": reason, "killed": bool(ok) and gone}
+        self.stopped = {"port": port, "pid": pid, "cmdline": cmd, "at": time.time(), "reason": reason, "killed": killed and gone}
         if not gone:
             self.last_error = f"进程 {pid} 已发出结束命令，但端口 {port} 还在监听"
             log.warning("%s", self.last_error)
@@ -189,6 +189,33 @@ class GpuArbiter:
         log.warning("%s", self.last_error)
         await self._persist()
         return False
+
+    @staticmethod
+    def _terminate(pid: int) -> bool:
+        """结束进程。Windows 只有强制那一条路；POSIX 先 TERM，一秒钟后还在才 KILL。
+
+        调用方还会再等端口消失（`_wait_port_gone`），这里不重复判「真的没了」。
+        """
+        if sys.platform == "win32":
+            return bool(_run(["taskkill", "/PID", str(pid), "/F"]))
+        import signal
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError as exc:
+            log.warning("停进程 %s 失败：%s", pid, exc)
+            return False
+        time.sleep(1.0)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError as exc:
+            log.warning("强杀进程 %s 失败：%s", pid, exc)
+            return False
+        return True
 
     @staticmethod
     def _spawn(cmdline: str) -> bool:

@@ -31,7 +31,7 @@ SEGMENTS = [
 
 
 def login(c: httpx.Client) -> dict:
-    r = c.post("/auth/login", json={"username": "admin", "password": "1234"})
+    r = c.post("/auth/login", json={"username": "admin", "password": "12345"})
     r.raise_for_status()
     return {"Authorization": f"Bearer {r.json()['access']}"}
 

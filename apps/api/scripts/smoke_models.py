@@ -69,7 +69,7 @@ async def wait_job(c: httpx.AsyncClient, h: dict, job_id: str, budget_s: int) ->
 
 async def main() -> int:
     async with httpx.AsyncClient(base_url=API, timeout=120.0) as c:
-        tok = (await c.post("/api/auth/login", json={"username": "admin", "password": "1234"})).json()["access"]
+        tok = (await c.post("/api/auth/login", json={"username": "admin", "password": "12345"})).json()["access"]
         h = {"Authorization": f"Bearer {tok}"}
         instances = (await c.get("/api/instances", headers=h)).json()
         local = next((i for i in instances if i["baseUrl"].rstrip("/") == COMFY), None)

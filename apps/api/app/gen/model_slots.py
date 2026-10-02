@@ -30,6 +30,19 @@ ROLE_BY_FIELD = {
 _ROLE_RANK = {"底模": 0, "一体化模型": 0, "模型": 1, "文本编码器": 2, "VAE": 3, "LoRA 适配器": 4}
 
 
+def is_model_field(field_name: str) -> bool:
+    """这个字段算不算「一个模型位」。
+
+    除了那五个 ComfyUI 惯用的权重文件字段，还认名字里带 model 的下拉项 ——
+    第三方节点就这么写：`FB_Qwen3TTSVoiceClone.model_choice`（0.6B/1.7B 两档）、
+    `Apply Whisper.model`（tiny…turbo）。这些不是文件名而是档位，但同样是"换哪个模型"，
+    用户在音色那条上要的正是这个。连线型输入（KSampler.model）不会被算进来：
+    它的 /object_info 描述是类型名而不是候选清单，取不到清单就没有可换的东西。
+    """
+    low = str(field_name).lower()
+    return field_name in MODEL_WIDGETS or "model" in low
+
+
 @dataclass
 class ModelSlot:
     """一个可以换的权重位。key 就是「节点号.字段名」，与任务里的覆盖表同形。"""
@@ -80,17 +93,17 @@ async def _options(client: ComfyNativeClient, class_type: str, field_name: str) 
     return _options_of(info, class_type, field_name)
 
 
-async def extract(client: ComfyNativeClient, graph: dict[str, Any]) -> list[ModelSlot]:
-    """从一张 API 图里挑出所有能换权重的节点。"""
-    class_types = sorted({str(n.get("class_type") or "") for n in graph.values() if n.get("class_type")})
-    payloads = await asyncio.gather(*(client.object_info(ct) for ct in class_types))
-    info = {ct: (payload.get(ct) or {}) for ct, payload in zip(class_types, payloads)}
+def slots_from_info(info: dict[str, Any], graph: dict[str, Any]) -> list[ModelSlot]:
+    """用**已经拿到手**的 /object_info 挑模型位。
 
+    体检与重扫本来就拉过一次全量（约 30MB），再让 extract() 按 class 逐个问一遍，
+    等于在实例正忙的时候多拖它两趟 —— 那条 ReadError 就是这么来的。
+    """
     out: list[ModelSlot] = []
     for node_id, node in graph.items():
         class_type = str(node.get("class_type") or "")
         for field_name in (node.get("inputs") or {}):
-            if field_name not in MODEL_WIDGETS:
+            if not is_model_field(field_name):
                 continue
             options = _options_of(info, class_type, field_name)
             if not options:
@@ -110,6 +123,14 @@ async def extract(client: ComfyNativeClient, graph: dict[str, Any]) -> list[Mode
             )
     out.sort(key=lambda s: (_ROLE_RANK.get(s.role, 9), s.node))
     return out
+
+
+async def extract(client: ComfyNativeClient, graph: dict[str, Any]) -> list[ModelSlot]:
+    """从一张 API 图里挑出所有能换权重的节点。"""
+    class_types = sorted({str(n.get("class_type") or "") for n in graph.values() if n.get("class_type")})
+    payloads = await asyncio.gather(*(client.object_info(ct) for ct in class_types))
+    info = {ct: (payload.get(ct) or {}) for ct, payload in zip(class_types, payloads)}
+    return slots_from_info(info, graph)
 
 
 # 内置模板的图在后端现拼，节点号是 builtin_graphs.py 里写死的，所以这里同样写死一份声明。
@@ -163,6 +184,66 @@ async def builtin(client: ComfyNativeClient, template_key: str) -> list[ModelSlo
     return out
 
 
+async def validate(client: ComfyNativeClient, class_map: dict[str, str], overrides: dict[str, Any],
+                   *, where: str = "这台实例") -> None:
+    """入队前就把话说清楚：要换的位存不存在、那个文件在这台实例上有没有。
+
+    建图要到队列里才做（要问实例、要上传参考图），但「选了一个不存在的权重」这种错
+    等到那时才报，用户看到的只是一个失败任务。这里只需要「节点号 → class」的对应关系，
+    所以三条路各有出处：直接给图看图、给工作流看库里那条、给内置模板看 BUILTIN_MODEL_LOADERS。
+    """
+    seen: dict[str, dict[str, Any]] = {}
+    for raw_key, raw_value in (overrides or {}).items():
+        key = str(raw_key).strip()
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        node_id, _, field_name = key.partition(".")
+        class_type = class_map.get(node_id)
+        if class_type is None:
+            raise GenError(
+                f"要换的模型位 {key} 在这张图上没有对应节点（没勾加速档时就不挂 Turbo LoRA；"
+                "也可能是工作流改过或实例变了，去工作流库重新扫描）",
+                kind="workflow_drift",
+            )
+        if not is_model_field(field_name):
+            raise GenError(f"{key} 不是模型位（认 {sorted(MODEL_WIDGETS)} 与名字里带 model 的下拉项）", kind="client_validation")
+        if class_type not in seen:
+            seen[class_type] = await client.object_info(class_type)
+        options = _options_of(seen[class_type], class_type, field_name)
+        if not options:
+            raise GenError(f"{where}没报出 {class_type}.{field_name} 的可选清单，换不了这个模型",
+                           kind="missing_models")
+        if value not in options:
+            near = [o for o in options if o.split("/")[-1].lower() in value.lower()][:5] or options[:5]
+            raise GenError(
+                f"{where}没有 {value}（{class_type}.{field_name}）。可换成：{'、'.join(near)}",
+                kind="missing_models",
+            )
+
+
+def value_problems(info: dict[str, Any], graph: dict[str, Any]) -> list[str]:
+    """图里写死的模型值在这台实例的清单里找不到。
+
+    提交上去只会得到一条 ComfyUI 的 validation 错（"model: 'whisper-large-v3' not in [...]"），
+    那是程序的语言。这里提前说人话，并且把可选项递出去 —— 界面上正是有模型下拉可换。
+    只报不改：凑一个同族档位是出过事的判法（见本模块开头）。
+    """
+    out: list[str] = []
+    for node_id, node in graph.items():
+        class_type = str(node.get("class_type") or "")
+        for field_name, value in (node.get("inputs") or {}).items():
+            if not is_model_field(field_name) or not isinstance(value, str) or not value:
+                continue
+            options = _options_of(info, class_type, field_name)
+            if options and value not in options:
+                out.append(
+                    f"{class_type}.{field_name}（#{node_id}）要的是 {value}，这台实例上没有；"
+                    f"可换成：{'、'.join(options[:8])}"
+                )
+    return out
+
+
 async def apply(client: ComfyNativeClient, graph: dict[str, Any], overrides: dict[str, Any],
                 *, where: str = "这台实例") -> tuple[dict[str, Any], list[str]]:
     """把「节点号.字段名 → 文件名」写进图里，逐个核对文件真的存在。
@@ -187,8 +268,8 @@ async def apply(client: ComfyNativeClient, graph: dict[str, Any], overrides: dic
                 "也可能是工作流改过或实例变了，去工作流库重新扫描）",
                 kind="workflow_drift",
             )
-        if field_name not in MODEL_WIDGETS:
-            raise GenError(f"{key} 不是模型位，只有 {sorted(MODEL_WIDGETS)} 这些字段能换", kind="client_validation")
+        if not is_model_field(field_name):
+            raise GenError(f"{key} 不是模型位（认 {sorted(MODEL_WIDGETS)} 与名字里带 model 的下拉项）", kind="client_validation")
         class_type = str(node.get("class_type") or "")
         options = await _options(client, class_type, field_name)
         if not options:

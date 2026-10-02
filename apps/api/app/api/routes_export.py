@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import subprocess
 import uuid
 import xml.sax.saxutils as sax
@@ -20,7 +19,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, text
 
+from .. import runtime
 from ..config import get_settings
+from ..export_paths import file_url as media_url
 from ..db import session_factory
 from ..logging_setup import get_logger
 from ..models import Media
@@ -59,8 +60,31 @@ class TimelineBody(CamelModel):
     title: str | None = None
 
 
-def _ffmpeg() -> str | None:
-    return shutil.which("ffmpeg")
+async def _media_map(ids: list[int | None]) -> dict[int, Media]:
+    """按 id 拿没被软删的媒体行。这里不报错：导出的镜头可能还没出片，缺的要能列进 skipped。"""
+    want = [int(i) for i in ids if i]
+    if not want:
+        return {}
+    async with session_factory()() as s:
+        return {
+            m.id: m
+            for m in (
+                await s.execute(select(Media).where(Media.id.in_(want), Media.deleted_at.is_(None)))
+            ).scalars()
+        }
+
+
+async def _ffmpeg() -> str | None:
+    """先看「设置 → 系统」里存的可执行文件，再退到 PATH。
+
+    存了但那个文件已经不存在（挪过盘、卸过软件）就当没存过，不能拿着死路径去起进程。
+    """
+    from .. import paths as path_store
+
+    ff = (await path_store.load_overrides()).get("ffmpeg")
+    if ff and Path(ff).is_file():
+        return ff
+    return runtime.ffmpeg_binary()
 
 
 async def _resolve(media_ids: list[int]) -> list[Media]:
@@ -89,13 +113,26 @@ async def _resolve(media_ids: list[int]) -> list[Media]:
 
 async def _finish(rel: str, size: int, mime: str, kind: str, project_key: str | None, title: str) -> dict[str, Any]:
     media_id = str(uuid.uuid4())
+    # 导出产物也要带宽高/时长：成片列表的时长标签以前恒是「第 N 段」，就是因为这行没人填
+    from .. import media_probe
+
+    abs_path = Path(get_settings().media_root).resolve() / rel
+    head = b""
+    try:
+        with abs_path.open("rb") as fh:
+            head = fh.read(128 * 1024)
+    except OSError:
+        pass
+    props = media_probe.probe(abs_path, head)
     async with session_factory()() as s:
         row = (
             await s.execute(
                 text(
                     """
-                    INSERT INTO media(uuid, project_key, kind, role, ref_id, path, bytes, mime, origin, meta)
-                    VALUES (:u, :p, :k, 'export', :r, :path, :b, :mime, '{}'::jsonb, :meta)
+                    INSERT INTO media(uuid, project_key, kind, role, ref_id, path, bytes, mime,
+                                      width, height, fps, duration_ms, origin, meta)
+                    VALUES (:u, :p, :k, 'export', :r, :path, :b, :mime,
+                            :w, :h, :fps, :dur, '{}'::jsonb, :meta)
                     RETURNING id
                     """
                 ),
@@ -106,7 +143,11 @@ async def _finish(rel: str, size: int, mime: str, kind: str, project_key: str | 
                     "r": title[:128],
                     "path": rel,
                     "b": size,
-                    "mime": mime,
+                    "mime": props.get("mime") or mime,
+                    "w": props.get("width"),
+                    "h": props.get("height"),
+                    "fps": props.get("fps"),
+                    "dur": props.get("duration_ms"),
                     "meta": json.dumps({"title": title}, ensure_ascii=False),
                 },
             )
@@ -123,9 +164,10 @@ async def export_merge(project_key: str, body: MergeBody, _: Any = Depends(login
     先试 `-c copy`（秒级），失败再重编码 —— 各段编码参数一致时 copy 就够了，
     但预览档和全质量档混在一起时 copy 会花屏，只能重编码。
     """
-    exe = _ffmpeg()
+    exe = await _ffmpeg()
     if not exe:
-        raise HTTPException(501, "PATH 里没有 ffmpeg，装一个再来（winget install Gyan.FFmpeg）")
+        raise HTTPException(501, "PATH 里没有 ffmpeg，装一个再来（winget install Gyan.FFmpeg），"
+                                 "或者在「设置 → 系统 → 目录」里直接指到那个 ffmpeg.exe")
     rows = await _resolve(body.media_ids)
     s = get_settings()
     out_dir = Path(s.media_root) / "exports" / project_key
@@ -211,18 +253,21 @@ def _tc(seconds: float) -> str:
 
 
 @router.post("/projects/{project_key}/export/edl")
-async def export_edl(project_key: str, body: TimelineBody, _: Any = Depends(login_gate)) -> dict[str, str]:
+async def export_edl(project_key: str, body: TimelineBody, _: Any = Depends(login_gate)) -> dict[str, Any]:
     """CMX3600 EDL。manga-studio 这里只弹一句「暂未开发」，我们真出。"""
+    rows = await _media_map([s.media_id for s in body.shots])
     lines = [f"TITLE: {body.title or project_key}", "FCM: NON-DROP FRAME", ""]
     cursor = 0.0
     for i, shot in enumerate(body.shots, start=1):
         src_in, src_out = cursor, cursor + shot.duration_sec
         record_in, record_out = src_in, src_out
         name = (shot.title or f"SHOT {i:03d}").replace(" ", "_")[:24]
+        media = rows.get(shot.media_id) if shot.media_id else None
+        clip_name = Path(media.path).name if media else (shot.title or f"shot_{i:03d}")
         lines += [
             f"{i:03d}  {name:<24} V     C        "
             f"{_tc(src_in)} {_tc(src_out)} {_tc(record_in)} {_tc(record_out)}",
-            f"* FROM CLIP NAME: {shot.title or f'shot_{i:03d}'}",
+            f"* FROM CLIP NAME: {clip_name}",
             f"* SCENE: {shot.scene_name or ''}",
             f"* CAMERA MOVEMENT: {shot.camera_movement or ''}",
             "",
@@ -232,24 +277,36 @@ async def export_edl(project_key: str, body: TimelineBody, _: Any = Depends(logi
 
 
 @router.post("/projects/{project_key}/export/xml")
-async def export_xml(project_key: str, body: TimelineBody, _: Any = Depends(login_gate)) -> dict[str, str]:
-    """FCP7 XML（剪映/Premiere/Resolve 都吃这个）。"""
-    seq_in = 0
+async def export_xml(project_key: str, body: TimelineBody, _: Any = Depends(login_gate)) -> dict[str, Any]:
+    """FCP7 XML（剪映/Premiere/Resolve 都吃这个）。
+
+    pathurl 必须是磁盘上真的那个文件：以前写的是按序号编出来的 `shot_001.mp4`，
+    导进去整条时间轴全是 offline 素材，等于白导。没有产物的镜头不硬编假路径，
+    而是跳到 skipped 里说清楚。
+    """
+    rows = await _media_map([s.media_id for s in body.shots])
+    seq_in = 0.0
     items = []
+    skipped: list[str] = []
     for i, shot in enumerate(body.shots, start=1):
-        start_tc = _tc(seq_in / 30 * 30)
-        end_tc = _tc((seq_in + shot.duration_sec))
+        media = rows.get(shot.media_id) if shot.media_id else None
+        if media is None:
+            skipped.append(f"镜 {shot.index or i}（还没有可指向的产物）")
+            continue
+        start_tc = _tc(seq_in)
+        end_tc = _tc(seq_in + shot.duration_sec)
         items.append(
             "        <clip-item><name>{name}</name><in>{tin}</in><out>{tout}</out>"
             "<start>{sin}</start><end>{eout}</end>"
-            "<file><pathurl>file://localhost/shot_{i:03d}.mp4</pathurl></file>"
+            "<file><pathurl>{url}</pathurl><name>{fname}</name></file>"
             "<rate><timebase>30</timebase><ntsc>TRUE</ntsc></rate></clip-item>".format(
                 name=sax.escape(shot.title or f"SHOT {i:03d}"),
                 tin="00:00:00:00",
                 tout=_tc(shot.duration_sec),
                 sin=start_tc,
                 eout=end_tc,
-                i=i,
+                url=sax.escape(media_url(media)),
+                fname=sax.escape(Path(media.path).name),
             )
         )
         seq_in += shot.duration_sec
@@ -259,7 +316,10 @@ async def export_xml(project_key: str, body: TimelineBody, _: Any = Depends(logi
         + "\n".join(items)
         + "\n  </track></trackformat></video>\n </sequence>\n</xmeml>\n"
     )
-    return {"format": "xml", "text": xml}
+    out: dict[str, Any] = {"format": "xml", "text": xml, "clips": len(items)}
+    if skipped:
+        out["skipped"] = skipped
+    return out
 
 
 @router.post("/projects/{project_key}/export/jianying")

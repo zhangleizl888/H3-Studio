@@ -51,6 +51,8 @@ class LlmBody(CamelModel):
     chat_path: str | None = None
     model: str | None = None
     is_default: bool | None = None
+    # 留空 = 按 scope 兜底（本机 1800 秒 / 云端 300 秒）。见 llm_timeout_seconds 迁移的说明
+    timeout_seconds: int | None = Field(None, ge=30, le=7200)
 
 
 class LlmCreate(LlmBody):
@@ -75,6 +77,8 @@ class RunBody(CamelModel):
     # 只有 script_chat 读这两个：多轮历史 + 编辑器里的当前正文（正文不走 input，input 是这一轮的指令）
     messages: list[ChatTurn] | None = Field(None, max_length=40)
     script: str | None = None
+    # 技能库里的 id（数字）。正文由后端读出来并进 system 尾巴，前端不重发正文
+    skill_ids: list[str] | None = Field(None, max_length=20)
 
 
 def _to_out(row: LlmBackend) -> dict[str, Any]:
@@ -91,11 +95,19 @@ def _to_out(row: LlmBackend) -> dict[str, Any]:
         "streamStyle": row.stream_style,
         "model": caps.get("model"),
         "caps": caps,
+        "timeoutSeconds": row.timeout_seconds,
+        "effectiveTimeoutS": effective_timeout(row),
         "isDefault": bool(row.is_default),
         "lastProbeAt": row.last_probe_at.isoformat() if row.last_probe_at else None,
         "lastProbeOk": row.last_probe_ok,
         "lastError": row.last_error,
     }
+
+
+def effective_timeout(row: LlmBackend) -> int:
+    """没显式配就按位置兜底。本机是单槽串行：27B 在 8 t/s 下跑满 4096 token 要 8 分钟多，
+    300 秒那个写死值会把还在正常生成的调用掐成 ReadTimeout。"""
+    return int(row.timeout_seconds or (1800 if row.scope == "local" else 300))
 
 
 def _spec(row: LlmBackend) -> LlmSpec:
@@ -108,6 +120,7 @@ def _spec(row: LlmBackend) -> LlmSpec:
         api_key=decrypt(from_b64(row.api_key_enc)),
         model=caps.get("model"),
         chat_path=row.chat_path,
+        timeout_s=float(row.timeout_seconds or effective_timeout(row)),
     )
 
 
@@ -139,6 +152,7 @@ async def create_backend(body: LlmCreate, request: Request, actor: Any = Depends
         chat_path=body.chat_path or ("/api/chat" if body.kind == "ollama" else "/chat/completions"),
         stream_style="ndjson" if body.kind == "ollama" and not body.base_url.rstrip("/").endswith("/v1") else "sse",
         capabilities={"model": body.model} if body.model else {},
+        timeout_seconds=body.timeout_seconds,
     )
     session.add(row)
     try:
@@ -172,6 +186,9 @@ async def update_backend(backend_id: str, body: LlmBody, request: Request, actor
         caps = dict(row.capabilities or {})
         caps["model"] = body.model
         row.capabilities = caps
+    # 超时允许显式清空回"按 scope 兜底"，所以看字段有没有出现，而不是值是不是 None
+    if "timeout_seconds" in given:
+        row.timeout_seconds = body.timeout_seconds
     await session.commit()
     await session.refresh(row)
     return _to_out(row)
@@ -267,6 +284,14 @@ async def set_default(backend_id: str, purpose: str | None = None, actor: Any = 
     return {"ok": True}
 
 
+async def _skills_block_for(session: AsyncSession, ids: list[str] | None) -> str:
+    """选中的技能拼成一段附加要求，进这次调用的 system。上限与判据见 routes_skills.resolve_block。"""
+    from .routes_skills import resolve_block
+
+    block, _names = await resolve_block(session, ids, for_model=True)
+    return block
+
+
 @router.post("/llm/run")
 async def run(body: RunBody, request: Request, _: Any = Depends(login_gate), session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     """同步跑一个用途。结果回给前端直接写进 IndexedDB 的项目里。"""
@@ -293,6 +318,7 @@ async def run(body: RunBody, request: Request, _: Any = Depends(login_gate), ses
     # 反过来也一样：文本模型开跑前让本机 ComfyUI 先把权重卸掉，给它腾出显存
     await _free_local_comfyui(request)
 
+    block = await _skills_block_for(session, body.skill_ids)
     payload = {
         "input": body.input,
         "targetSec": body.target_sec,
@@ -303,6 +329,8 @@ async def run(body: RunBody, request: Request, _: Any = Depends(login_gate), ses
         "style": body.style,
         "messages": [m.model_dump() for m in body.messages] if body.messages else None,
         "script": body.script,
+        # 技能正文由后端读库拼好：前端只交 id，改了技能所有挂着它的调用下次自动生效
+        "skillsBlock": block,
     }
     try:
         if dispatcher is None:
@@ -313,7 +341,13 @@ async def run(body: RunBody, request: Request, _: Any = Depends(login_gate), ses
         raise HTTPException(400, exc.message) from exc
     except Exception as exc:
         log.exception("llm/run 失败")
-        raise HTTPException(502, f"调用 {row.name} 失败：{type(exc).__name__}: {redact(str(exc))[:200]}") from exc
+        # httpx 的 ReadTimeout str() 是空串，以前这里只剩一个光秃秃的冒号（"ReadTimeout: "），
+        # 用户既不知道等了多少秒，也不知道该去哪儿调
+        detail = redact(str(exc)).strip()[:200] or (
+            f"{effective_timeout(row)} 秒内没等到完整回答。本机模型单槽串行本来就慢，"
+            "可在「设置 → AI 模型」把这台后端的「单次超时」调大"
+        )
+        raise HTTPException(502, f"调用 {row.name} 失败：{type(exc).__name__}: {detail}") from exc
 
 
 async def _free_local_comfyui(request: Request) -> None:

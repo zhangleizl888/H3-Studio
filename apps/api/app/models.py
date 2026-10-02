@@ -4,7 +4,7 @@
 服务端**不建 projects 表**；因此媒体只能用 project_key 软引用客户端项目 id，
 而不是外键。这条约束是刻意的：换后端不会被创作数据绑死。
 
-服务端持有的：users、refresh_tokens、gen_instances、llm_backends、workflows、
+服务端持有的：users、refresh_tokens、api_tokens、gen_instances、llm_backends、workflows、skills、
 jobs、instance_locks、media、script_versions、audit_log、app_settings。
 
 `script_versions` 是唯一的例外：它存的是**生成出来的剧本正文本身**，属于创作数据，
@@ -117,6 +117,28 @@ class RefreshToken(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class ApiToken(Base):
+    """智能体/CLI 用的长期凭据（`h3_at_...`）。
+
+    为什么不复用 refresh_tokens：那条链路是给浏览器的，轮换、撤销、单飞刷新都跟着
+    「一个人坐在屏幕前」的假设走；智能体要的是「一把能给别人、能单独吊销、能限权」的钥匙。
+    只存 sha256，明文只在创建那一次出现。
+    """
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    # ["read"] / ["read","dispatch"] / ["read","dispatch","admin"]：只能收窄，不会越过属主的角色
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)), nullable=False, server_default=text("'{}'"))
+    expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class GenInstance(Base, TimestampMixin):
     """生成实例。分派看 protocol，不看服务商。"""
 
@@ -170,6 +192,9 @@ class LlmBackend(Base, TimestampMixin):
     stream_style: Mapped[str] = mapped_column(String(12), nullable=False, server_default="sse")
     capabilities: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # 单次调用超时：留空按 scope 兜（local 1800 / cloud 300）。本机 27B 出 4096 token 要 8 分钟，
+    # 写死 300 秒会把还在正常生成的调用掐成 ReadTimeout
+    timeout_seconds: Mapped[int | None] = mapped_column(Integer)
     last_probe_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     last_probe_ok: Mapped[bool | None] = mapped_column(Boolean)
     last_error: Mapped[str | None] = mapped_column(Text)
@@ -177,6 +202,7 @@ class LlmBackend(Base, TimestampMixin):
     __table_args__ = (
         CheckConstraint("scope in ('local','cloud')", name="ck_llm_scope"),
         CheckConstraint("kind in ('ollama','openai_compat')", name="ck_llm_kind"),
+        CheckConstraint("timeout_seconds BETWEEN 30 AND 7200", name="ck_llm_timeout_range"),
         Index("ix_llm_scope_default", "scope", "is_default"),
     )
 
@@ -210,6 +236,8 @@ class Workflow(Base, TimestampMixin):
     # 指向作者机器素材的控件：使用时必须由前端重新指定，不算缺东西
     pending_media: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     graph_original: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # 导入时那个文件叫什么。库里存的图是改写过的，文件名是用户认这条工作流的唯一线索
+    source_file: Mapped[str | None] = mapped_column(String(200))
     # 允许被「按任务自动选」选中；关掉就只能手动指定
     auto_select: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     # 同一类任务有多条合格工作流时，数字大的先选
@@ -234,6 +262,76 @@ class Workflow(Base, TimestampMixin):
         Index("ix_workflows_kind_auto", "task_kind", "auto_select"),
         CheckConstraint("task_kind in ('image','video','audio')", name="ck_workflows_task_kind"),
         CheckConstraint("executes_on in ('local','cloud_runninghub','any')", name="ck_workflows_executes_on"),
+    )
+
+
+class WorkflowModelBinding(Base, TimestampMixin):
+    """一条工作流在**某一台实例**上默认用哪些权重。
+
+    为什么不写进 workflows.graph 那一列：同一条图在本机用 4step Turbo、在自建 48G 云上
+    用 8step，这是每台机器各自的事实，写进图里就等于「换一台机器就得换一份库条目」。
+    也不写成 workflows 上的一个 jsonb：绑定要按实例独立读写、独立删除（实例被删要跟着清，
+    换图要按节点剪位），按行才做得到，整列重写会把并发下的更新互相盖掉。
+
+    workflow_ref 用字符串而不是外键：内置模板的图在后端现拼，它的默认权重同样要按实例分
+    （存成 "builtin:h3_video"）。代价是删工作流时得记得一起删 —— 见 routes_workflows。
+    """
+
+    __tablename__ = "workflow_model_bindings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    workflow_ref: Mapped[str] = mapped_column(String(64), nullable=False)
+    instance_id: Mapped[int] = mapped_column(ForeignKey("gen_instances.id", ondelete="CASCADE"), nullable=False)
+    # {"127.unet_name": "MiniMax_H3_...safetensors"}：键与任务参数 models 同形（节点号.字段名）
+    overrides: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # manual = 人在模型编辑里挑的；sync = 从别的实例同步过来的（值可能已被换成该台真有的文件）
+    source: Mapped[str] = mapped_column(String(16), nullable=False, server_default="manual")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("workflow_ref", "instance_id", name="uq_workflow_binding_ref_instance"),
+        Index("ix_workflow_binding_instance", "instance_id"),
+        CheckConstraint("source in ('manual','sync')", name="ck_workflow_binding_source"),
+    )
+
+
+class Skill(Base, TimestampMixin):
+    """技能库：一段可复用的写法要求，挂在提示词框旁边随生成一起发给模型。
+
+    和工作流库的分工：工作流管「这张图怎么算出来」（节点图与槽位），技能管「这段提示词
+    要按什么写法来」。它是全局共享的库，不属于某个项目，所以留在服务端 —— 项目实体在
+    浏览器 IndexedDB 里，而换一台机器还在的技能库才是库。
+
+    实体里只存 skill_ids（见前端 Character/Scene/Shot 的 skillIds），正文在提交那一刻由
+    后端读出来并进提示词槽：这样技能改了立刻生效，也不会把一份副本焊死在旧项目上。
+    """
+
+    __tablename__ = "skills"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    # 技能正文：发给模型的附加要求，原样存，不做任何加工
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 挂在哪一类提示词框上：general 全都能选，其余只在对应环节出现
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, server_default="general")
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
+    # manual = 页面上新建；imported = 从文件导进来（source 记它来自哪个文件/哪一批）
+    origin: Mapped[str] = mapped_column(String(16), nullable=False, server_default="manual")
+    source: Mapped[str | None] = mapped_column(String(200))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("stage in ('general','script','asset','video')", name="ck_skills_stage"),
+        CheckConstraint("origin in ('manual','imported')", name="ck_skills_origin"),
+        Index("ix_skills_stage_name", "stage", "name"),
     )
 
 

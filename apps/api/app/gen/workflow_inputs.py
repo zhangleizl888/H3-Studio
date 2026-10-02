@@ -56,10 +56,15 @@ COND_SIGNALS = {
     "Flux2Scheduler": {"width": "width", "height": "height"},
     # 声音克隆两条腿（装了包之后才会出现在图上；现在填了也只是不命中）
     "FB_Qwen3TTSVoiceClone": {"target_text": "prompt", "ref_text": "ref_text", "language": "language",
+                              "ref_audio": "ref_audios", "x_vector_only": "x_vector_only",
                               "seed": "seed", "temperature": "temperature"},
     "IndexTTS2Run": {"text": "prompt", "speed": "speed"},
     "Apply Whisper": {"language": "language"},
 }
+
+#: 由上游算出来、但用户可以直接给死值的具名输入（给了死值，上游那条支路就会被
+#: 「够不到出口」的清理整块删掉 —— 音色资产带着已知的参考文本时不必再跑一遍转写）。
+LINK_OVERRIDABLE = {"ref_text"}
 
 #: autogrow 组 → 信号名
 GROUP_SIGNALS = {"ref_images": "ref_images", "ref_videos": "ref_videos", "ref_audios": "ref_audios",
@@ -285,6 +290,12 @@ def derive(graph: dict[str, Any], object_info: dict[str, Any]) -> dict[str, Any]
                     cur = ((graph.get(hit[0]) or {}).get("inputs") or {}).get(hit[1])
                     put(sig_name, want, f"{hit[0]}.{hit[1]}", value=cur)
                     continue
+                if sig_name in LINK_OVERRIDABLE:
+                    # 值是上游算出来的字符串（whisper 转写参考音频），但用户给得出死值：
+                    # 露成文本槽，资产库里的音色就带着「参考音频 + 它说的话」复用，
+                    # 给了死值之后转写那条支路没人引用，会被出口可达性清理整块删掉。
+                    put(sig_name, "text", f"{nid}.{fname}")
+                    continue
                 # 尺寸/时长是「算出来的」，但算式那两个入口控件是前端真正该填的东西：
                 # 分辨率来自 ResolutionSelector（宽高比 + 兆像素），帧数来自「秒 → 17k+5」的表达式。
                 # 不把它们露成信号，导入的工作流就只能按作者调好的档位出片，项目改不了画幅。
@@ -383,3 +394,32 @@ TASK_FIELD_TO_SIGNAL = {
     "width": "width", "height": "height", "seconds": "frames", "frames": "frames",
     "steps": "steps", "seed": "seed",
 }
+
+
+#: 工作流「模式」：库里按它分组（文生视频 / 图生视频 / 全能参考 …）。
+#: 判据只有「这张图吃不吃某类素材」，全部来自 derive() 已经算好的信号，
+#: 所以导入时不需要人给每条工作流写一遍它是什么类型。
+_MODE_LABELS = {
+    "t2v": "文生视频", "i2v": "图生视频", "r2v": "全能参考",
+    "t2i": "文生图", "i2i": "指令编辑",
+    "voice": "声音克隆", "audio_gen": "文本配音",
+}
+
+
+def mode_of(kind: str, signals: list[dict[str, Any]]) -> tuple[str, str]:
+    """(模式代号, 中文标签)。认不出时给 custom，让界面照原样显示而不是硬套一个。"""
+    names = {str(s.get("name") or "") for s in (signals or [])}
+    if kind == "video":
+        if names & {"ref_images", "ref_videos", "ref_audios", "ref_video_audios"}:
+            key = "r2v"
+        elif names & {"first_frame", "last_frame", "guide_frame"}:
+            key = "i2v"
+        else:
+            key = "t2v"
+    elif kind == "image":
+        key = "i2i" if names & {"ref_images", "first_frame"} else "t2i"
+    elif kind == "audio":
+        key = "voice" if "ref_audios" in names else "audio_gen"
+    else:
+        key = "custom"
+    return key, _MODE_LABELS.get(key, "自定义")

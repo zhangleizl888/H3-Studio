@@ -24,8 +24,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-import httpx
-
 from .director import (
     METHODOLOGY,
     METHODOLOGY_HEADER,
@@ -40,6 +38,7 @@ from .director import (
     validate_storyboard,
 )
 from .logging_setup import get_logger, redact
+from .net import async_client, is_local_target
 
 log = get_logger("llm")
 
@@ -60,6 +59,21 @@ class LlmError(Exception):
 
     def as_dict(self) -> dict[str, Any]:
         return {"type": "llm_error", "message": self.message, "retryable": self.retryable}
+
+
+def _empty_reply_hint(reasoning: str, finish: Any, max_tokens: int) -> str:
+    """正文为空的真实原因有三种，以前只报一句"max_tokens 太小"，把最需要说的那种藏了。"""
+    n = len(reasoning.strip())
+    if n:
+        why = finish or "未知"
+        return (
+            f"模型只输出了 {n} 字的思考过程，正文是空的（finish_reason={why}，本轮预算 {max_tokens} token）。"
+            "带思考的本机模型会把预算全花在思考链上 —— 要结构化输出的调用已自动关思考，"
+            "若是自由改写用途，可把该后端的输出预算调大。"
+        )
+    if finish == "length":
+        return f"回答被截断在 {max_tokens} token，正文没写完就说结束了。把该后端的输出预算调大再试。"
+    return "模型返回了空内容（没吐思考、也没吐正文）。先探活这台后端，确认它真的载入了模型。"
 
 
 @dataclass
@@ -134,14 +148,14 @@ async def _get_root(spec: LlmSpec, path: str, timeout: float = 12.0) -> Any:
     root = spec.root
     if root.endswith("/v1"):
         root = root[: -len("/v1")]
-    async with httpx.AsyncClient(timeout=timeout) as c:
+    async with async_client(f"{root}{path}", timeout=timeout) as c:
         r = await c.get(f"{root}{path}", headers=_headers(spec))
         r.raise_for_status()
         return r.json()
 
 
 async def _get(spec: LlmSpec, path: str, timeout: float = 12.0) -> Any:
-    async with httpx.AsyncClient(timeout=timeout) as c:
+    async with async_client(f"{spec.root}{path}", timeout=timeout) as c:
         r = await c.get(f"{spec.root}{path}", headers=_headers(spec))
         r.raise_for_status()
         return r.json()
@@ -227,11 +241,13 @@ async def chat(
 ) -> ChatResult:
     used = model or spec.model or (await list_models(spec))[0] if not (model or spec.model) else (model or spec.model)
     t0 = time.monotonic()
+    reasoning: str = ""
+    finish: Any = None
     body: dict[str, Any] = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature, "stream": False}
     if schema:
         body["response_format"] = {"type": "json_schema", "json_schema": {"name": schema_name, "strict": True, "schema": schema}}
 
-    async with httpx.AsyncClient(timeout=spec.timeout_s) as c:
+    async with async_client(spec.root, timeout=spec.timeout_s) as c:
         if spec.is_ollama_native:
             body.update({"model": used, "format": schema if schema else "json"} if schema else {"model": used})
             r = await c.post(f"{spec.root}/api/chat", headers=_headers(spec), json={"model": used, "messages": messages, "stream": False, "options": {"temperature": temperature, "num_predict": max_tokens, **({"format": schema} if schema else {})}})
@@ -241,6 +257,10 @@ async def chat(
             usage = {"prompt_tokens": data.get("prompt_eval_count"), "completion_tokens": data.get("eval_count")}
         else:
             body["model"] = used
+            if schema and is_local_target(spec.root):
+                # 要机器可解析的结构化输出时，别让思考链把整段 max_tokens 吃光：
+                # 本机 Qwen3.8-27B 实测会把 6000 预算全花在 reasoning_content 上，content 空着回来
+                body["reasoning_effort"] = "none"
             path = spec.chat_path if spec.chat_path.startswith("/") else f"/{spec.chat_path}"
             base = spec.root if spec.root.endswith("/v1") else f"{spec.root}/v1"
             r = await c.post(f"{base}{path}", headers=_headers(spec), json=body)
@@ -249,11 +269,14 @@ async def chat(
             r.raise_for_status()
             data = r.json()
             choices = data.get("choices") or [{}]
-            text = ((choices[0].get("message") or {}).get("content")) or ""
+            msg = choices[0].get("message") or {}
+            text = msg.get("content") or ""
+            reasoning = msg.get("reasoning_content") or ""
+            finish = choices[0].get("finish_reason")
             usage = data.get("usage") or {}
 
     if not text.strip():
-        raise LlmError("模型返回了空内容（可能被上下文截断，或 max_tokens 太小）")
+        raise LlmError(_empty_reply_hint(reasoning, finish, max_tokens))
     return ChatResult(text=text.strip(), usage=usage, latency_ms=int((time.monotonic() - t0) * 1000), model=used)
 
 
@@ -496,16 +519,28 @@ async def run_purpose(spec: LlmSpec, purpose: Purpose, payload: dict[str, Any], 
         max_tokens = {"script_parse": 4096, "storyboard": 6000, "visualize": 1024, "script_write": 2500}[purpose]
         temperature = 0.85 if purpose == "script_write" else 0.35 if purpose in {"script_parse", "storyboard"} else 0.7
 
-    res = await chat(
-        spec,
-        msgs,
-        model=model,
-        schema=schema,
-        schema_name=purpose,
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
-    data = _loads(res.text)
+    # 技能是这次额外指定的写法要求，贴在 system 尾巴上：四个用途共用这一条路。
+    # 不放进 user 那段 —— 那里是待处理的稿本/素材描述，混进去模型会把它当正文一起改写。
+    block = str(payload.get("skillsBlock") or "").strip()
+    if block:
+        msgs = [
+            {**m, "content": f"{m['content']}\n\n{block}"} if i == 0 and m.get("role") == "system" else m
+            for i, m in enumerate(msgs)
+        ]
+
+    async def ask(extra: list[dict[str, Any]] | None = None, temp: float | None = None):
+        r = await chat(
+            spec,
+            [*msgs, *(extra or [])],
+            model=model,
+            schema=schema,
+            schema_name=purpose,
+            max_tokens=max_tokens,
+            temperature=temperature if temp is None else temp,
+        )
+        return r, _loads(r.text)
+
+    res, data = await ask()
 
     warnings: list[str] = []
     if is_h3:
@@ -516,6 +551,20 @@ async def run_purpose(spec: LlmSpec, purpose: Purpose, payload: dict[str, Any], 
                 + f"。这次花了 {res.latency_ms / 1000:.0f} 秒，白跑：可以换三段式，或把镜头卡里的动作与时长写得更具体再试。"
             )
     elif purpose == "storyboard":
+        if not (data.get("shots") or []):
+            # `{"shots": []}` 是"合法但没用"：schema 守住了，镜头表是空的，本机小模型偶发会这样。
+            # 当成功返回的话，前端只会看到"0 个镜头"，而这一轮的等待与显存已经白花了。
+            log.warning("storyboard 回了空镜头表，追加一句纠正再问一次")
+            res, data = await ask(
+                [{"role": "user", "content": "上一轮 shots 是空数组。这次必须直接给出至少 3 个镜头的 JSON，不要解释。"}],
+                temp=min(0.9, temperature + 0.15),
+            )
+        if not (data.get("shots") or []):
+            raise LlmError(
+                f"这台模型连着两次只回空镜头表（shots: []，第二次花了 {res.latency_ms / 1000:.0f} 秒）。"
+                "换提示词模式对此环节没用，请换一个更守 JSON 约定的文本后端，或把目标时长调大一些再试。",
+                retryable=True,
+            )
         warnings = validate_storyboard(data.get("shots") or [], float(target))
     elif purpose == "script_chat":
         # 模型最常见的违约是只回被改的那一段。整篇写回会把没改的段落一起抹掉，所以先量一下体量
@@ -548,7 +597,7 @@ _CANDIDATES = (
 async def _one_scan(port: int, hint: str) -> dict[str, Any] | None:
     spec = LlmSpec(base_url=f"http://127.0.0.1:{port}/v1", kind="openai_compat")
     try:
-        async with httpx.AsyncClient(timeout=4.0) as c:
+        async with async_client(f"http://127.0.0.1:{port}/v1/models", timeout=4.0) as c:
             r = await c.get(f"http://127.0.0.1:{port}/v1/models")
             if r.status_code == 401:
                 # 有服务但要 key：如实报，别把它当成「没装」

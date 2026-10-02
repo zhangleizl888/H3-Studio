@@ -53,14 +53,14 @@ async def clean():
 async def _admin(c: httpx.AsyncClient) -> dict:
     """要一张管理员票。
 
-    lifespan 会在「环回 + 库空」时预置演示账号 admin/1234，所以到测试这里 bootstrap
+    lifespan 会在「环回 + 库空」时预置演示账号 admin/12345，所以到测试这里 bootstrap
     可能已经晚了 —— 断言的是「我是管理员」，不是「我是那个建号的人」。
     """
     r = await c.post("/api/auth/bootstrap", json={"username": "admin", "password": ADMIN_PW})
     if r.status_code == 200:
         return {"Authorization": f"Bearer {r.json()['access']}"}
     assert r.status_code == 409, r.text
-    r = await c.post("/api/auth/login", json={"username": "admin", "password": "1234"})
+    r = await c.post("/api/auth/login", json={"username": "admin", "password": "12345"})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access']}"}
 

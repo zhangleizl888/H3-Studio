@@ -130,6 +130,8 @@ class Ctx:
     done: set[str] = field(default_factory=set)
     #: 指向作者机器素材的加载器控件（本机没有该文件不算缺东西，是等前端重指的槽位）
     pending_media: list[str] = field(default_factory=list)
+    #: 广播节点（Anything Everywhere 一族）按类型记下的源：{输出类型: [(节点, 槽号)]}
+    broadcasts: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
 
     @property
     def known(self) -> set[str]:
@@ -157,12 +159,16 @@ PASSTHROUGH: dict[str, str] = {
     "easy cleanGpuUsed": "anything",
     "Anything Everywhere": "anything",
     "Anything Everywhere3": "anything",
-    # pysssss 的 ShowText 只是把文本显示出来，下游要的还是那份文本
-    "ShowText|pysssss": "text",
+    # pysssss 的 ShowText 只是把文本显示出来，下游要的还是那份文本    "ShowText|pysssss": "text",
     # LayerStyle 的拼接板：透传已拼好的画面，只是丢了对照框上的标签文字
     "LayerUtility: ImageReelComposit": "reel_1",
     "LayerUtility: ImageReelCompose": "reel_1",
 }
+
+#: 广播节点：一个节点把好几路输出按类型分发给图上所有需要它的地方。
+#: API 导出里这些分发**不是连线**（画布上按名字隐式接的），所以穿透那种一对一改接接不回来 ——
+#: 先按类型把源记下来，缺口处再按类型分发回去。
+BROADCAST_CLASSES = {"Anything Everywhere", "Anything Everywhere3", "Anything Everywhere Fan (Plus)"}
 
 #: 类名 + 字段名替换。值 = (核心等价类, {旧字段: 新字段}, {写进新节点的默认值})
 REMAP: dict[str, tuple[str, dict[str, str], dict[str, Any]]] = {
@@ -849,10 +855,44 @@ def _coerce_combo(graph: dict[str, Any], nid: str, ctx: Ctx) -> None:
                 if fname in _MEDIA_FIELDS:
                     ctx.pending_media.append(f"{nid}.{fname}")
                 continue
+            elif _whisper_size(val):
+                # whisper 的 model 是档位清单（tiny…large-v3），作者写的是 large-v3，
+                # 本机有没有那一档取决于权重下没下完 —— 同一串 ladder 里就近换成一档真的存在的，
+                # 并点名报出来：转写档位变了是事实，藏着不说更糟。
+                hit = _nearest_whisper(_whisper_size(val), choices)
+                if hit:
+                    nd["inputs"][fname] = hit
+                    ctx.changes.append(Change(nid, "替换档位", nd["class_type"], nd["class_type"],
+                                              f"转写档位 {val!r} 本机没有，改用同族已就位的 {hit!r}"
+                                              "（只影响参考音频的转写准确度，给了 ref_text 时这段会被整条撤掉）"))
+                    continue
+                ctx.gaps.append(Gap(nid, nd["class_type"],
+                                    f"{fname}={val!r} 不在本机候选里（可选：{choices[:5]}）",
+                                    "whisper 权重（models/stt/whisper）"))
+                nd["inputs"].pop(fname, None)
             else:
                 ctx.gaps.append(Gap(nid, nd["class_type"],
                                     f"{fname}={val!r} 不在本机候选里（可选：{choices[:5]}）"))
                 nd["inputs"].pop(fname, None)
+
+
+#: openai-whisper 的档位阶梯，从小到大。只在同一条阶梯内就近换档。
+_WHISPER_LADDER = ["tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "large"]
+
+
+def _whisper_size(val: Any) -> str | None:
+    s = str(val or "").lower().removeprefix("whisper-")
+    return s if s in _WHISPER_LADDER else None
+
+
+def _nearest_whisper(wanted: str, choices: list[str]) -> str | None:
+    if wanted not in _WHISPER_LADDER:
+        return None
+    want_i = _WHISPER_LADDER.index(wanted)
+    have = [c for c in choices if _whisper_size(c) in _WHISPER_LADDER]
+    if not have:
+        return None
+    return min(have, key=lambda c: abs(_WHISPER_LADDER.index(_whisper_size(c)) - want_i))
 
 
 # ───────────────────────── 常量折叠与孤立分支清理 ─────────────────────────
@@ -918,6 +958,218 @@ def _fold_primitives(graph: dict[str, Any], ctx: Ctx) -> int:
             ctx.changes.append(Change(nid, "折叠", nd["class_type"], "",
                                       f"把常量 {str(raw)[:60]!r} 直接写进下游参数"))
     return folded
+
+
+def _collect_broadcasts(graph: dict[str, Any], ctx: Ctx) -> int:
+    """把广播节点（Anything Everywhere 一族）的每一路输入按**输出类型**记进 ctx.broadcasts。
+
+    必须在穿透规则删掉这些节点之前跑：#30 双模双采那条的 345 号 AE3 上写着
+    anything=344(SAMPLER)、anything2=343(NOISE)、anything3=351(GUIDER)，352 号 AE 写着
+    anything=136(CONDITIONING)。作者画布上那两个 SamplerCustomAdvanced 的 noise/sampler/guider
+    和两个 BasicGuider 的 conditioning 全靠这几路广播接上，API 导出里一条线都看不见。
+    """
+    n = 0
+    for nid, nd in graph.items():
+        ct = str(nd.get("class_type") or "")
+        if ct not in BROADCAST_CLASSES:
+            continue
+        for fname, val in (nd.get("inputs") or {}).items():
+            if not is_link(val):
+                continue
+            src, slot = str(val[0]), int(val[1])
+            sct = str((graph.get(src) or {}).get("class_type") or "")
+            outs = ((ctx.object_info.get(sct) or {}).get("output") or [])
+            if slot >= len(outs) or not isinstance(outs[slot], str):
+                continue
+            ctx.broadcasts.setdefault(outs[slot].upper(), []).append((src, slot))
+            n += 1
+    return n
+
+
+def _link_only_type(spec: Any) -> str | None:
+    """这个必填输入是不是「只能连线」的，是的话它要什么类型。
+
+    ComfyUI 把两种东西都报成列表，靠第二个元素分家：
+      纯连线 → ["NOISE", {}]            （首元素是类型名，配置是空的）
+      控件   → ["INT", {"default":…}]   或 [["a.safetensors",…], {…}]（首元素是候选清单）
+    所以「首元素是全大写字符串 + 没有 default/values/min 这些控件配置」才算只能连线。
+    """
+    first = spec[0] if isinstance(spec, list) and spec else spec
+    if not (isinstance(first, str) and first.isupper()):
+        return None
+    if isinstance(spec, list) and len(spec) > 1 and isinstance(spec[1], dict):
+        if any(k in spec[1] for k in ("default", "values", "min", "max", "step", "multiline")):
+            return None
+    return first
+
+
+def _live_nodes(graph: dict[str, Any]) -> set[str]:
+    """能从出口节点（Save*/Preview*）倒着走到的那些节点。
+
+    补连线只该管这些：通不到出口的分支下一道剪死分支规则就会删掉，
+    给它接线等于替一个马上就要消失的节点编一条连线，还会报出一条假缺口（#39 的 48 号就这么中招）。
+    """
+    live: set[str] = set()
+    stack = [nid for nid, nd in graph.items()
+             if str(nd.get("class_type") or "").startswith(("Save", "Preview"))]
+    while stack:
+        nid = stack.pop()
+        if nid in live:
+            continue
+        live.add(nid)
+        for val in ((graph.get(nid) or {}).get("inputs") or {}).values():
+            if is_link(val) and str(val[0]) not in live:
+                stack.append(str(val[0]))
+    return live
+
+
+def _autogrow_item_type(spec: Any) -> str | None:
+    """COMFY_AUTOGROW_V3 组里每一项要的类型（组位展平成 group.item_0 之后照样是这个）。
+
+    形状是 ["COMFY_AUTOGROW_V3", {"template": {"input": {"required": {"ref_video": ["IMAGE", …]}}}}]。
+    一个组模板只有一个必填项（ref_images / ref_videos / ref_audios 都是），所以直接取第一个；
+    真出现多项时宁可不判，也别猜错一个把整条链接歪。
+    """
+    if not (isinstance(spec, list) and spec and spec[0] == "COMFY_AUTOGROW_V3"):
+        return None
+    opts = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+    req = ((opts.get("template") or {}).get("input") or {}).get("required") or {}
+    if len(req) != 1:
+        return None
+    item = next(iter(req.values()))
+    first = item[0] if isinstance(item, list) and item else item
+    return first if isinstance(first, str) and first.isupper() else None
+
+
+def _bridge_video_type_mismatches(graph: dict[str, Any], ctx: Ctx) -> int:
+    """源给出 VIDEO、消费位要 IMAGE/AUDIO 时，中间插一层 GetVideoComponents 拆帧/拆音轨。
+
+    #31 全能参考 60 秒那条就是这么死的：作者用 Video Slice 把一条 60s 参考片切成四段
+    分别喂给四个 MiniMaxH3ReferenceToVideo 的 ref_videos 组位，而那个组位的模板写的是
+    **IMAGE（"Reference video frames at 24 fps"）**。本机 MiniMaxH3 节点只收帧，
+    提交上去就是 `received_type(VIDEO) mismatch input_type(IMAGE)`，一句人话都没有。
+    导入时把 VHS_LoadVideo 换成 LoadVideo+GetVideoComponents 用的是同一招，这里补上漏的那一路。
+    """
+    #: 拆出来的第几槽对应哪种类型（GetVideoComponents: 0=画面帧 IMAGE、1=音轨 AUDIO）
+    slot_of = {"IMAGE": 0, "AUDIO": 1}
+    bridged = 0
+    for nid, nd in list(graph.items()):
+        ct = str(nd.get("class_type") or "")
+        info = ctx.object_info.get(ct) or {}
+        bags = [(info.get("input") or {}).get(g) or {} for g in ("required", "optional")]
+        inputs = nd.get("inputs") or {}
+        for fname, val in list(inputs.items()):
+            if not is_link(val) or "." not in fname:
+                continue
+            group, _, tail = fname.partition(".")
+            want = _autogrow_item_type(next((b.get(group) for b in bags if b.get(group)), None))
+            if want not in slot_of:
+                continue
+            src, slot = str(val[0]), int(val[1])
+            sct = str((graph.get(src) or {}).get("class_type") or "")
+            outs = ((ctx.object_info.get(sct) or {}).get("output") or [])
+            have = outs[slot] if slot < len(outs) and isinstance(outs[slot], str) else None
+            if have == want or have not in ("VIDEO",) or not _node_present(ctx, "GetVideoComponents"):
+                continue
+            lv = _add(graph, "GetVideoComponents", {"video": [src, slot]}, "拆出帧与音轨")
+            inputs[fname] = [lv, slot_of[want]]
+            ctx.changes.append(Change(nid, "补拆帧", ct, ct,
+                                      f"{group}.{tail} 要 {want}，上游 {src}（{sct}）给的是 {have}，"
+                                      f"中间插 GetVideoComponents #{lv} 取第 {slot_of[want]} 个输出"))
+            bridged += 1
+    return bridged
+
+
+def _node_present(ctx: Ctx, class_type: str) -> bool:
+    return class_type in ctx.object_info
+
+
+def _reconnect_link_inputs(graph: dict[str, Any], ctx: Ctx) -> int:
+    """把「只能连线」的必填输入接回图上悬空的那个生产者。
+
+    为什么要有这一步：作者常用 Anything Everywhere（KJNodes）这类**广播**节点把
+    RandomNoise / BasicGuider 隐式分发到好几个采样器上。那种节点在我们的规则里是「穿透」，
+    而穿透只能一对一改接 —— 广播的多路分发接不回来，于是 SamplerCustomAdvanced 的
+    guider/noise 就这么空了。ComfyUI 的报错只有一句 `Prompt outputs failed validation｜guider`，
+    看不出是谁的锅（#30 双模双采那条真机就是这么死的）。
+
+    判据收得很窄，只做"接得上且不会猜错"的那部分：
+    ① 只补**图里根本没写**的必填输入（写了值的一律不动）；autogrow 组已经按展平名接了的也不动；
+    ② 只认**类型名**（GUIDER / NOISE / MODEL 这种全大写、且配置里没有 default/values 那些控件项）——
+       那是只能连线的输入，控件型的不在范围内；
+    ③ 出口节点（Save*/Preview*）不当生产者：它们有 IMAGE 输出，但把终端节点当上游是错的，
+       轻则绕出一圈没用的依赖，重则成环；
+    ④ 优先接**当前没人引用**的那个（有下游的说明作者另有安排，不抢）；悬空的多于一个、
+       或全图只有一个同类型生产者，才接；再多就报缺口让人决定，绝不猜。
+    同一个生产者可以服务多个同类型缺口 —— 那正是被我们拆掉的广播节点的语义（两级采样的
+    两个 sampler 共用一颗 RandomNoise 就是作者的原意）。
+    """
+    producers_all: dict[str, list[str]] = {}
+    producers_free: dict[str, list[str]] = {}
+    for nid, nd in graph.items():
+        ct = str(nd.get("class_type") or "")
+        if ct not in ctx.known or ct.startswith(("Save", "Preview")):
+            continue
+        for t in ((ctx.object_info.get(ct) or {}).get("output") or []):
+            if not (isinstance(t, str) and t.isupper()):
+                continue
+            producers_all.setdefault(t, []).append(nid)
+            if not consumers_of(graph, nid):
+                producers_free.setdefault(t, []).append(nid)
+
+    def pick(type_name: str) -> tuple[str, int] | None:
+        # 先认广播节点记下的源：那是作者写在 AE 节点上的显式意图，比"图上只有一个"更可信
+        bcast = ctx.broadcasts.get(type_name) or []
+        if len(bcast) == 1:
+            return bcast[0]
+        free = producers_free.get(type_name) or []
+        if len(free) == 1:
+            return (free[0], 0)
+        allc = producers_all.get(type_name) or []
+        return (allc[0], 0) if len(allc) == 1 else None
+
+    def _pass() -> int:
+        n = 0
+        live = _live_nodes(graph)
+        for nid, nd in graph.items():
+            if nid not in live:
+                continue
+            ct = str(nd.get("class_type") or "")
+            info = ctx.object_info.get(ct) or {}
+            inputs = nd.get("inputs") or {}
+            for fname, spec in ((info.get("input") or {}).get("required") or {}).items():
+                if fname in inputs or "." in fname:
+                    continue
+                if any(str(k).startswith(fname + ".") for k in inputs):
+                    continue          # autogrow 组已经通过展平名接了线
+                want = _link_only_type(spec)
+                if not want:
+                    continue
+                src = pick(want)
+                if src is None:
+                    n_free = len(producers_free.get(want) or [])
+                    n_all = len(producers_all.get(want) or [])
+                    why = (f"图上有 {n_all} 个 {want} 生产者（其中 {n_free} 个悬空），不知道接哪个" if n_all
+                           else "图上根本没有产出这个类型的节点")
+                    ctx.gaps.append(Gap(nid, ct, f"必填的连线输入 {fname}:{want} 接不上 —— {why}"))
+                    continue
+                src_node, src_slot = src
+                inputs[fname] = [src_node, src_slot]
+                ctx.changes.append(Change(nid, "补连线", ct, ct,
+                                          f"{fname}:{want} 原图里没写（作者用广播节点隐式接的），"
+                                          f"接 {src_node}:{src_slot}（{(graph.get(src_node) or {}).get('class_type')}）"))
+                n += 1
+        return n
+
+    # 接上一条线会让原来悬空的生产者变成"活"的（BasicGuider 被采样器接走之后它自己的
+    # conditioning 才需要补），所以要跑到不再有新连线为止，而不是扫一遍就走。
+    wired = 0
+    for _ in range(4):
+        got = _pass()
+        if not got:
+            break
+        wired += got
+    return wired
 
 
 def _prune_unreferenced(graph: dict[str, Any], ctx: Ctx) -> int:
@@ -989,6 +1241,8 @@ def adapt_graph(graph: dict[str, Any], object_info: dict[str, Any], *, rounds: i
         for k, v in graph.items()
     }
     ctx = Ctx(object_info=object_info)
+    # 广播节点要趁它还在图上时先记下各路源（穿透规则会把它删掉）
+    _collect_broadcasts(out, ctx)
     _flatten_media_loader(out, ctx)
 
     for _ in range(rounds):
@@ -1063,6 +1317,11 @@ def adapt_graph(graph: dict[str, Any], object_info: dict[str, Any], *, rounds: i
 
     # 装不到的节点先降级（断文本连线 / 删纯预览分支），再清死分支
     degrade_unresolved(out, ctx)
+    # 补连线必须排在剪死分支之前：RandomNoise 这类悬空生产者只有 widget 输入，
+    # 先剪的话它会被当死分支删掉，采样器的 noise 就再也接不回去了。
+    _reconnect_link_inputs(out, ctx)
+    # 同理，补拆帧要在剪枝前面：插进去的 GetVideoComponents 一接上，上游那条切片才有下游。
+    _bridge_video_type_mismatches(out, ctx)
     for nid in [n for n, d in out.items() if (d.get("class_type") or "") not in ctx.known]:
         nd = out.get(nid)
         if not nd or consumers_of(out, nid):

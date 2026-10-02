@@ -6,7 +6,7 @@ r"""批量导入 E:\下载 里的工作流到工作流库（走 HTTP 接口，�
 
 用法（后端要在跑）：
     PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe scripts/import_workflows.py \
-        --src "E:/下载" --username admin --password 1234
+        --src "E:/下载" --username admin --password 12345
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def main() -> int:
     ap.add_argument("--base", default="http://127.0.0.1:8788")
     ap.add_argument("--src", default="E:/下载")
     ap.add_argument("--username", default="admin")
-    ap.add_argument("--password", default="1234")
+    ap.add_argument("--password", default="12345")
     ap.add_argument("--instance", default=None, help="实例 id，缺省用第一台")
     ap.add_argument("--only", default=None, help="只导名字里含这个串的工作流")
     ap.add_argument("--fresh", action="store_true", help="先删掉库里所有导入过的工作流再导（重扫规则变了时用）")
