@@ -1418,6 +1418,43 @@ https://www.runninghub.cn/proxy-plus/{你的apiKey}      # 48G
 | 视频大文件 | Range 请求 + 边缘缓存头；超阈值拒绝上传 |
 | 首次启动 | 强制创建 admin，弱密码拒绝；`JWT_SECRET` 首次自动生成并写 `.env`（0600） |
 
+### 9.6 智能体接入层（MCP + `h3` CLI，2026-10-02 落地）
+
+完整操作文档在 `docs/AGENT-ACCESS.zh.md`（一键接入、各家客户端落点、三档 scope、故障排查表）。这里只记架构级的取舍：
+
+```
+客户端（Qoder / Claude Desktop / Cursor / Windsurf）
+  → MCP：stdio（同机）或 streamable-http（跨机/隧道）
+    → h3 mcp serve（纯 HTTP 客户端）
+      → 后端 :8788（唯一事实源：派发循环 + GPU 仲裁 + 库）
+```
+
+- **MCP/CLI 绝不 import `app.main`**。那个进程带着 `QueueDispatcher` 与 `GpuArbiter`，
+  多起一个实例就是两个调度器抢同一张 24GB 卡（§5.3、§0.1 的硬约束）。所以接入层是客户端，
+  对外暴露只是换监听地址，不改后端一行运行期逻辑。
+- **新增 `api_tokens` 表**（`h3_at_` 前缀，库里只存 HMAC-SHA256 摘要，明文只在创建那次返回）。
+  不复用 `refresh_tokens`：那条链路假设「一个人坐在屏幕前」，智能体要的是能给别人、能单独吊销、
+  能限权的钥匙。scope 三档 `read|dispatch|admin`，**只能收窄**：门禁需要哪一档由 `role_gate` 反推，
+  属主角色仍是天花板。
+- **streamable-http 用「调用方那把 token」打后端**（ASGI 中间件验完塞进 contextvar，
+  每次调用按那把钥匙向 `/api/agent-tokens/whoami` 取身份，60 秒缓存）。不是「MCP 进程一把万能钥匙，
+  谁连进来都借它」。这条是对外暴露的真实门禁，别为了省一次请求改成进程级凭据。
+- **被暴露的永远是 MCP 端口（默认 8790），不是后端 8788**。后端继续只听环回，`/docs`、
+  用户接口、前端 REST 契约都不出门。`h3 expose lan|cloud` 只升级 MCP 的监听面。
+- **stdio 客户端配置里不放 token**：子进程自己读 `~/.h3/config.json`，写进客户端 JSON 的
+  只有命令行 + `PYTHONPATH`，避免同一把凭据被 dotfiles 同步或被提交进仓库。
+- 工具面 73 个：显式工具只覆盖主干流程，其余走 `api_catalog` + `api_request` 两个通用出口
+  ——不为 90 个端点维护一份和 OpenAPI 平行的清单，那必然漂移。
+- **创作实体仍在浏览器 IndexedDB**（§4 的 A 方案不变）。所以 `export_timeline`、
+  `storyboard_from_script` 要调用方把分镜表交进来；「项目快照镜像」是下一批的入口，
+  做之前先复述 §4 那条「两个真相会打架」的理由。
+
+实测（本机 2026-10-02）：`h3 mcp test` stdio 握手 + `health` 调用通过；streamable-http 三条都对
+（无凭据 401 `missing_bearer`、坏凭据 401、真 token 拿到 73 个工具并成功调用）；`h3 doctor` 全绿；
+`tests/test_cli_offline.py` + `tests/test_agent_token_live.py` 26 条通过，非 live 套件 50 条未受影响。
+`TransportSecuritySettings.allowed_hosts` 留空会把环回自己拒掉（回 `Invalid Host header`），
+默认白名单必须含 `127.0.0.1:端口`。
+
 ---
 
 ## 10. API 概要
@@ -1428,6 +1465,15 @@ POST   /api/auth/login            → {access, refresh, user}
 POST   /api/auth/refresh
 POST   /api/auth/logout
 GET    /api/auth/me
+POST   /api/auth/change-password    {currentPassword, newPassword} → 改自己的口令；先验当前口令，成功后该账号全部浏览器会话失效（agent token 不动）
+
+# agent token（§9.6，给 MCP/CLI 的长期凭据；明文只在创建响应里出现一次）
+GET    /api/agent-tokens/whoami            → {user, via: agent-token|jwt, scopes, expiresAt}
+GET    /api/agent-tokens                   (admin)
+POST   /api/agent-tokens                   (admin)  {name, scopes[], ttlDays?} → {…, token}
+POST   /api/agent-tokens/{id}/revoke       (admin，幂等)
+
+# 以上整套 REST 就是 MCP 与 h3 CLI 的唯一出口（§9.6）；查询参数 snake_case、请求体 camelCase
 
 # 生成实例（protocol = comfy_native | rh_task；placement = local | cloud_self | cloud_runninghub）
 GET    /api/instances?placement=&protocol=
@@ -1643,6 +1689,70 @@ POST   /api/projects/{key}/trash       删项目时整批进回收站；顺手�
 
 ---
 
+### 11.1.4 资产级「工作流 / 模型」切换实测（2026-10-02，`apps/api/scripts/e2e_voice_clone.py`）
+
+要做的事：角色、服装变体、场景、**音色**、出片，每一处都能自己挑「用哪条工作流、在哪台实例上、换哪颗权重」，
+本地库工作流与内置模板同池，云端只到「档位」为止。
+
+**新增的三层，以及它们为什么必须在这一层**
+
+| 层 | 落点 | 为什么在这儿 |
+|---|---|---|
+| 模型位清单 | `gen/model_slots.py` + `GET /api/workflows/{id}/models?instance_id=` | 字段名（`unet_name/clip_name/vae_name/lora_name`）、节点号、有哪些文件，全由实例的 `/object_info` 回答；认「名字里带 model 的下拉项」是为了接第三方节点（`FB_Qwen3TTSVoiceClone.model_choice`、`Apply Whisper.model`）。内置模板没有图库可查，按 `BUILTIN_MODEL_LOADERS` 那份写死的声明回答，「现在用的是哪颗」与真出图共用 `discover_*_weights` |
+| 覆盖的传递 | `JobCreate.models`（键 `节点号.字段名`）→ `params.models` → 队列 `_apply_models` | 入队前就用实例自己的清单逐条核对，**绝不做就近凑匹配**（当年把 H3 底模配成 Qwen-Image 的那次，提交上去不报缺文件只报采样错）。写权重的时机在**填图之前**：`prepare()` 会把这次喂不到素材的分支整支撤掉（二合一那条里的 `Apply Whisper #44` 就是这么没的），写晚了只会对着不存在的节点报错 |
+| 结果留痕 | 参数表 `derived.modelOverrides` + 任务 `fill.modelNotes` + 队列页详情 | 「界面选了 A、图上其实是 B」只能靠留痕查出来。被撤掉的分支不静默：填图说明里明写「你挑的权重没有落进最终图」 |
+
+**实测数字**（本机 4090 / ComfyUI 0.37.4，实例 `530`，全程走队列不是直投）
+
+| 路径 | 结果 |
+|---|---|
+| 选一个实例上不存在的大模型 → 入队 | **400**，原话：`实例 530没有 this_weight_does_not_exist.safetensors（UNETLoader.unet_name）。可换成：…` 五条候选直接递到眼前 |
+| 内置模板 `qwen_image` + `501.unet_name` | 512×512 / 4 步，**140s succeeded**（含权重加载），`权重: 底模 #501 ← qwen_image_2.1_int8_convrot.safetensors`，产物 media **267**（image/character） |
+| 库工作流 **32**（声音克隆二合一）+ `44.model=base` | 参数表回显 `44.model ← base`；**30s succeeded**，产物 media **266**（audio/voice，70.5 KB mp3）；填图留痕含「提示词 写入 1 处 / 参考音频 第 1 个 ← …flac / 删掉够不到任何出口的 Apply Whisper #44」 |
+| 库工作流 **28**（图文一键生视频·加速版）+ `119.vae_name` | 864×480 / 2.3s / turbo 8 步，**420s succeeded**（冷启动含加载，att=1 一次过），产物 media **271**（video，269 KB） |
+| 参考音频怎么来的 | `FB_Qwen3TTSCustomVoice`（预设说话人 Serena，文本「今天的风很大，记得把窗关上。」）直投一条 → `output/h3verify/ref_00001.flac` → 上传成 media **265**（audio/voice_ref）。**克隆底子必须文本已知**，见 [[comfyui-ops-voice-chain]] 第 4 条 |
+| 前端联动 | 内嵌浏览器（打 `innerWidth=1600` 破 PC 墙）真点：新建角色表单里选了 38 + `qwen_image_2.1_bf16` → 创建后 IndexedDB 里 `characters[].preset = {workflow:"38", models:{5.unet_name:…}}`；改回「跟随默认」那个 key 被删掉而不是留空串；导演台选 28 落进 `shots[].preset`；`videoRequest` 出来的是 `template:"auto" + workflowId:28` |
+
+**顺带修掉的一处隐患**：`gen_instances` 那行被删过（清空来自 `tests/test_queue_live.py` 的夹具，见下），
+重建后 id 从 `503` 变成 `530`，项目里存的却是旧 id —— 每条生成都会先撞在「实例不在已登记的实例里」上。
+现在 `lib/preset.ts` 的 `syncInstancePointers` 会把死指针**对齐到真实登记的那台**（只有一台时映射没有歧义），
+覆盖 `config.imageInstanceId/videoInstanceId` 与镜头/角色/音色/场景各自的 `preset.instanceId`；
+登记的实例不止一台时**只摘不猜**（猜错实例的代价是白烧十几分钟显存）。
+`renderLogs` 里的 instanceId 是当时的事实，不改写历史。验收：项目 `p_6qesg5rr` 的两处默认已是 `530`，
+四类请求（出图/出片/场景/音色）带出去的 `instanceId` 全是 `530`。
+
+**这台机器还验不了的**：① `h3_chain`（多段无缝续拍）固定走内置模板，用户在那里挑的工作流用不上，界面已明写；
+② 音色的**固定化**没做 —— 导入那条图里没有 `FB_Qwen3TTSSaveVoice/LoadSpeaker`，每次都得重给参考音频；
+③ 云端档位只有置灰与说明，`rh_task` 客户端仍未实现；④ 目视核对仍要人在桌面 Chrome 里看（截图接口在这台机器上不可用）。
+
+---
+
+### 11.1.4 全链路体检实测（2026-10-02，`docs/FULL-AUDIT-2026-10-02.zh.md`）
+
+四条链全部真跑到产物。项目「体检项目 A」（`p_pjbxtqg5`，240 字三幕剧本），文本模型 = llama.cpp Qwen3.8-27B-NVFP4-MTP-HIGH。
+
+**先说两个决定数字的前提**：① 本轮用 `-c 32768` 起 llama-server（PLAN §5.2 那条命令），同一份权重在 `-c 131072` 下生成吞吐只有 **8.1–8.6 t/s**（24 GB 被 KV 挤满），`-c 32768` 是 **37.6–38.0 t/s** —— 差 4.5 倍，任何耗时数字换个 `-c` 就不能照抄；② 跑文本期间 ComfyUI 是停掉的。
+
+| 环节 | 实测 | 备注 |
+|---|---|---|
+| `script_parse` 带思考 | **77.1 秒 / 3227 token** | 正文与思考分开返回，预算被思考吃掉一半以上 |
+| `script_parse` 关思考 | **19.6 秒 / 1005 token** | 本机 + 带 schema 的调用现在自动发 `reasoning_effort:"none"` |
+| `storyboard` | 30–45 秒 / 6000 预算，**7 镜**（景别+运镜+逐镜秒数齐） | 有一次 1.76 秒回 `shots:[]` —— 合法但没用，现在会纠正重问一次 |
+| 定妆图 / 场景图 / 首帧 | 单条 **10–20 秒**，工作流 #38 按任务自动选 | 1344×768 PNG，约 2.1–2.2 MB |
+| 音色（#32 声音克隆二合一） | 排队+执行约 1 分钟，产物 **954 ms** mp3 | 参考音频是几秒干净人声 + 它的原话文本 |
+| 出片（#28 图文一键生视频） | **7 分 06 秒**，864×480 @24fps，8.0 秒成片，753 KB | att=1 一次过；首帧真喂进图（fillNotes 记着来源文件） |
+| 合并导出 | `-c copy` 一次命中，秒级 | 重编码只在参数不齐时才走 |
+| 打包 | 11 个文件 / 22.9 MB ZIP | |
+| 备份 | `pg_dump`（.tooling-pg 内嵌那份）真跑通，dump 166 KB，rc=0 | 看清单是 `pg_restore -l`，`pg_dump --list` 不存在 |
+
+两条环境性质的账也要记在这里，不然下次又要重查：
+
+1. **`POST :8188/free` 归还不了 `cudaMallocAsync` 的池子**。实测 `/free` 之后 `nvidia-smi` 仍是 **23,016 / 24,564 MiB 已用**，而 ComfyUI 自己报 `torch_vram_total 2.3 GB`；`stop.ps1` 一停就回到 **1,540 MiB 已用**。后端 12 GB 显存闸读的是 `vram_free`，池子不放任务就一直 `queued`，而提示语当时写的是「去停本地 27B」—— 那是错的（文本模型没在跑）。
+2. **桌面进程常态占掉约 1.5 GB 显存**（Chrome / 微信 / EdgeWebView 那批 C+G 进程），所以「空闲 24 GB」从来就不存在，留给出图出片的实际是 22.6 GB 左右。
+
+本轮修掉的东西里属于 §11.1 这条线的：文本后端超时从写死 300 秒变成可配 `llm_backends.timeout_seconds`（本机默认 1800）；autogrow 组剪位后压实号位（`节点 81：Required input is missing` 那批全灭）；重试不再复用库里那张旧图；导出页补上产物收口（以前刚出的片在合并列表里看不见）；产物元数据（mime/宽高/fps/时长）由 `media_probe` 真填。
+
+---
 ### 11.2 五阶段功能对照（2026-09-30 还原后复审，取代当日的「代码审计结论」）
 
 口径：**已实现** = 页面有入口且真的改到数据；**部分** = 有 UI 没落地逻辑；**未** = 代码里没这个概念。
@@ -1689,9 +1799,12 @@ POST   /api/projects/{key}/trash       删项目时整批进回收站；顺手�
   这个本项目最重要的信号失去颜色。
 - 它是 Tailwind CDN + 无 token 层、无表格、无焦点样式、无响应式（<1024px 直接劝退）；我们保留 token 层、
   表格/时间轴、`:focus-visible` 与 reduced-motion，不把这几项对齐掉。
-- **演示账号**：后端仅在「监听环回 + 库里一个账号都没有」时预置 `admin / 1234`，前端自动登录到工作台。
-  口令策略在 `seed_loopback_admin` 里被显式绕过并有告警；`--host` 不是环回就不建号，必须走
-  `POST /api/auth/bootstrap`。给团队用之前设 `VITE_DEV_AUTOLOGIN=false` 并改口令。
+- **演示账号**：后端仅在「监听环回 + 库里一个账号都没有」时预置 `admin / 12345`，前端自动登录到工作台。
+  库里那个演示 `admin` 的口令还停在上一代演示口令 `1234` 上时，环回启动会就地升到 `12345` —— `1234` 同时被钉进
+  弱口令表，所以没有人会把自己主动设成一个「下次重启会被静默换掉」的口令；`--host` 不是环回就不建号也不升级，
+  必须走 `POST /api/auth/bootstrap`。口令门槛只有「≥4 位 + 不在常见弱口令表」两条，在 `security.py` 一处定义，
+  前端 `lib/password.ts` 是它的镜像。改口令走登录页之外左栏「改密」→ `POST /api/auth/change-password`：
+  先验当前口令，改完吊销该账号全部浏览器会话（`agent token` 不动）。给团队用之前设 `VITE_DEV_AUTOLOGIN=false`。
 
 ---
 
