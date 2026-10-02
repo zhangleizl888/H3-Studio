@@ -3,3 +3,5 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+  # electron 的 install 脚本负责下载真正的二进制；pnpm 10 默认不放行 → 装完没有 dist/electron
+  - electron

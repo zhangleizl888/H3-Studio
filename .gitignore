@@ -1,6 +1,8 @@
 # 依赖与虚拟环境
 node_modules/
 .venv/
+# 打包专用环境（pgserver 只有 cp312 轮子，不能复用 apps/api/.venv）
+.packaging/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -11,6 +13,7 @@ __pycache__/
 dist/
 build/
 *.tsbuildinfo
+*.egg-info/
 
 # 本地数据与生成物（含 pgdata、媒体产物、导出、下载、临时）
 data/
@@ -37,5 +40,8 @@ apps/api/.secret-jwt_key.txt
 # 编辑器 / 操作系统
 .DS_Store
 Thumbs.db
+
+# Qoder：本项目本地的 MCP 配置（h3 mcp install 的默认落点，含本机绝对路径）
+.qoder/settings.local.json
 .idea/
 .vscode/
