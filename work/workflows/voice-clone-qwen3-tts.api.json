@@ -1,0 +1,100 @@
+{
+  "40": {
+    "_meta": {
+      "title": "Load Audio"
+    },
+    "inputs": {
+      "audio": "6afe8a320e0b54ad74fb7fc52d82d2de42b7be3b80ad5d0b1d6db427cd43ed8a.WAV",
+      "audioUI": ""
+    },
+    "class_type": "LoadAudio"
+  },
+  "41": {
+    "_meta": {
+      "title": "AudioCrop"
+    },
+    "inputs": {
+      "audio": [
+        "40",
+        0
+      ],
+      "duration": 10.0,
+      "start_index": 0.0
+    },
+    "class_type": "TrimAudioDuration"
+  },
+  "43": {
+    "_meta": {
+      "title": "🎭 Qwen3-TTS VoiceClone"
+    },
+    "inputs": {
+      "seed": 129226910394535,
+      "top_k": 20,
+      "top_p": 0.8,
+      "device": "auto",
+      "language": "Auto",
+      "ref_text": [
+        "44",
+        0
+      ],
+      "attention": "auto",
+      "precision": "bf16",
+      "ref_audio": [
+        "41",
+        0
+      ],
+      "target_text": "鱼和熊掌不可兼得！但是解渴呀！",
+      "temperature": 1,
+      "model_choice": "0.6B",
+      "x_vector_only": false,
+      "max_new_tokens": 2048,
+      "custom_model_path": "",
+      "repetition_penalty": 1.05,
+      "unload_model_after_generate": false
+    },
+    "class_type": "FB_Qwen3TTSVoiceClone"
+  },
+  "44": {
+    "_meta": {
+      "title": "获取音频的文本内容"
+    },
+    "inputs": {
+      "audio": [
+        "41",
+        0
+      ],
+      "model": "large-v3",
+      "prompt": "",
+      "language": "Chinese"
+    },
+    "class_type": "Apply Whisper"
+  },
+  "52": {
+    "_meta": {
+      "title": "Save Audio (MP3) (DEPRECATED)"
+    },
+    "inputs": {
+      "audio": [
+        "43",
+        0
+      ],
+      "audioUI": "",
+      "quality": "128k",
+      "filename_prefix": "xiao1"
+    },
+    "class_type": "SaveAudioMP3"
+  },
+  "53": {
+    "_meta": {
+      "title": "Preview Audio"
+    },
+    "inputs": {
+      "audio": [
+        "43",
+        0
+      ],
+      "audioUI": ""
+    },
+    "class_type": "PreviewAudio"
+  }
+}

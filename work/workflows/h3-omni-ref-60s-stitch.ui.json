@@ -1,0 +1,3142 @@
+{
+  "id": "a68e91bd-e717-43ce-b8bc-722a3ac606dc",
+  "extra": {
+    "ds": {
+      "scale": 0.7247295000000004,
+      "offset": [
+        564.4573667538477,
+        499.31247144209294
+      ]
+    },
+    "ue_links": [],
+    "0246.VERSION": [
+      0,
+      0,
+      4
+    ],
+    "pixaromaGroups": [],
+    "frontendVersion": "1.23.0",
+    "VHS_MetadataImage": true,
+    "VHS_latentpreview": false,
+    "VHS_KeepIntermediate": true,
+    "KKvideo_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "KKvideo_latentpreviewrate": 0
+  },
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "VIDEO"
+    ],
+    [
+      3,
+      1,
+      0,
+      3,
+      0,
+      "VIDEO"
+    ],
+    [
+      5,
+      1,
+      0,
+      4,
+      0,
+      "VIDEO"
+    ],
+    [
+      7,
+      1,
+      0,
+      5,
+      0,
+      "VIDEO"
+    ],
+    [
+      45,
+      17,
+      0,
+      18,
+      0,
+      "VIDEO"
+    ],
+    [
+      53,
+      27,
+      0,
+      30,
+      0,
+      "MINIMAX_H3_DIRECT_MODEL"
+    ],
+    [
+      54,
+      28,
+      0,
+      30,
+      1,
+      "MINIMAX_H3_TEXT_ENCODER"
+    ],
+    [
+      55,
+      29,
+      0,
+      30,
+      2,
+      "MINIMAX_H3_VAE_BUNDLE"
+    ],
+    [
+      56,
+      2,
+      0,
+      30,
+      9,
+      "VIDEO"
+    ],
+    [
+      57,
+      6,
+      0,
+      30,
+      3,
+      "IMAGE"
+    ],
+    [
+      58,
+      7,
+      0,
+      30,
+      4,
+      "IMAGE"
+    ],
+    [
+      59,
+      8,
+      0,
+      30,
+      5,
+      "IMAGE"
+    ],
+    [
+      60,
+      9,
+      0,
+      30,
+      6,
+      "IMAGE"
+    ],
+    [
+      61,
+      10,
+      0,
+      30,
+      7,
+      "IMAGE"
+    ],
+    [
+      62,
+      11,
+      0,
+      30,
+      11,
+      "AUDIO"
+    ],
+    [
+      63,
+      12,
+      0,
+      30,
+      14,
+      "STRING"
+    ],
+    [
+      64,
+      30,
+      0,
+      31,
+      0,
+      "IMAGE"
+    ],
+    [
+      65,
+      30,
+      1,
+      31,
+      1,
+      "AUDIO"
+    ],
+    [
+      66,
+      31,
+      0,
+      17,
+      0,
+      "VIDEO"
+    ],
+    [
+      67,
+      27,
+      0,
+      32,
+      0,
+      "MINIMAX_H3_DIRECT_MODEL"
+    ],
+    [
+      68,
+      28,
+      0,
+      32,
+      1,
+      "MINIMAX_H3_TEXT_ENCODER"
+    ],
+    [
+      69,
+      29,
+      0,
+      32,
+      2,
+      "MINIMAX_H3_VAE_BUNDLE"
+    ],
+    [
+      70,
+      3,
+      0,
+      32,
+      9,
+      "VIDEO"
+    ],
+    [
+      71,
+      6,
+      0,
+      32,
+      3,
+      "IMAGE"
+    ],
+    [
+      72,
+      7,
+      0,
+      32,
+      4,
+      "IMAGE"
+    ],
+    [
+      73,
+      8,
+      0,
+      32,
+      5,
+      "IMAGE"
+    ],
+    [
+      74,
+      9,
+      0,
+      32,
+      6,
+      "IMAGE"
+    ],
+    [
+      75,
+      10,
+      0,
+      32,
+      7,
+      "IMAGE"
+    ],
+    [
+      76,
+      11,
+      0,
+      32,
+      11,
+      "AUDIO"
+    ],
+    [
+      77,
+      12,
+      0,
+      32,
+      14,
+      "STRING"
+    ],
+    [
+      78,
+      32,
+      0,
+      33,
+      0,
+      "IMAGE"
+    ],
+    [
+      79,
+      32,
+      1,
+      33,
+      1,
+      "AUDIO"
+    ],
+    [
+      80,
+      33,
+      0,
+      17,
+      1,
+      "VIDEO"
+    ],
+    [
+      81,
+      27,
+      0,
+      34,
+      0,
+      "MINIMAX_H3_DIRECT_MODEL"
+    ],
+    [
+      82,
+      28,
+      0,
+      34,
+      1,
+      "MINIMAX_H3_TEXT_ENCODER"
+    ],
+    [
+      83,
+      29,
+      0,
+      34,
+      2,
+      "MINIMAX_H3_VAE_BUNDLE"
+    ],
+    [
+      84,
+      4,
+      0,
+      34,
+      9,
+      "VIDEO"
+    ],
+    [
+      85,
+      6,
+      0,
+      34,
+      3,
+      "IMAGE"
+    ],
+    [
+      86,
+      7,
+      0,
+      34,
+      4,
+      "IMAGE"
+    ],
+    [
+      87,
+      8,
+      0,
+      34,
+      5,
+      "IMAGE"
+    ],
+    [
+      88,
+      9,
+      0,
+      34,
+      6,
+      "IMAGE"
+    ],
+    [
+      89,
+      10,
+      0,
+      34,
+      7,
+      "IMAGE"
+    ],
+    [
+      90,
+      11,
+      0,
+      34,
+      11,
+      "AUDIO"
+    ],
+    [
+      91,
+      12,
+      0,
+      34,
+      14,
+      "STRING"
+    ],
+    [
+      92,
+      34,
+      0,
+      35,
+      0,
+      "IMAGE"
+    ],
+    [
+      93,
+      34,
+      1,
+      35,
+      1,
+      "AUDIO"
+    ],
+    [
+      94,
+      35,
+      0,
+      17,
+      2,
+      "VIDEO"
+    ],
+    [
+      95,
+      27,
+      0,
+      36,
+      0,
+      "MINIMAX_H3_DIRECT_MODEL"
+    ],
+    [
+      96,
+      28,
+      0,
+      36,
+      1,
+      "MINIMAX_H3_TEXT_ENCODER"
+    ],
+    [
+      97,
+      29,
+      0,
+      36,
+      2,
+      "MINIMAX_H3_VAE_BUNDLE"
+    ],
+    [
+      98,
+      5,
+      0,
+      36,
+      9,
+      "VIDEO"
+    ],
+    [
+      99,
+      6,
+      0,
+      36,
+      3,
+      "IMAGE"
+    ],
+    [
+      100,
+      7,
+      0,
+      36,
+      4,
+      "IMAGE"
+    ],
+    [
+      101,
+      8,
+      0,
+      36,
+      5,
+      "IMAGE"
+    ],
+    [
+      102,
+      9,
+      0,
+      36,
+      6,
+      "IMAGE"
+    ],
+    [
+      103,
+      10,
+      0,
+      36,
+      7,
+      "IMAGE"
+    ],
+    [
+      104,
+      11,
+      0,
+      36,
+      11,
+      "AUDIO"
+    ],
+    [
+      105,
+      12,
+      0,
+      36,
+      14,
+      "STRING"
+    ],
+    [
+      106,
+      36,
+      0,
+      37,
+      0,
+      "IMAGE"
+    ],
+    [
+      107,
+      36,
+      1,
+      37,
+      1,
+      "AUDIO"
+    ],
+    [
+      108,
+      37,
+      0,
+      17,
+      3,
+      "VIDEO"
+    ],
+    [
+      109,
+      38,
+      0,
+      2,
+      2,
+      "FLOAT"
+    ],
+    [
+      110,
+      38,
+      0,
+      3,
+      2,
+      "FLOAT"
+    ],
+    [
+      111,
+      38,
+      0,
+      4,
+      2,
+      "FLOAT"
+    ],
+    [
+      112,
+      38,
+      0,
+      5,
+      2,
+      "FLOAT"
+    ]
+  ],
+  "nodes": [
+    {
+      "id": 1,
+      "pos": [
+        60,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        320,
+        246
+      ],
+      "type": "LoadVideo",
+      "flags": {},
+      "order": 0,
+      "inputs": [
+        {
+          "name": "file",
+          "type": "COMBO",
+          "label": "file",
+          "widget": {
+            "name": "file"
+          }
+        },
+        {
+          "name": "keep_audio",
+          "type": "BOOLEAN",
+          "label": "keep_audio",
+          "widget": {
+            "name": "keep_audio"
+          }
+        },
+        {
+          "name": "trim_time",
+          "type": "STRING",
+          "label": "trim_time",
+          "widget": {
+            "name": "trim_time"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            7,
+            5,
+            3,
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "None",
+        true,
+        "0",
+        "image"
+      ]
+    },
+    {
+      "id": 2,
+      "pos": [
+        900,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        315,
+        146
+      ],
+      "type": "Video Slice",
+      "flags": {},
+      "order": 13,
+      "inputs": [
+        {
+          "link": 1,
+          "name": "video",
+          "type": "VIDEO",
+          "label": "video"
+        },
+        {
+          "name": "start_time",
+          "type": "FLOAT",
+          "label": "start_time",
+          "widget": {
+            "name": "start_time"
+          }
+        },
+        {
+          "link": 109,
+          "name": "duration",
+          "type": "FLOAT",
+          "label": "duration",
+          "widget": {
+            "name": "duration"
+          }
+        },
+        {
+          "name": "strict_duration",
+          "type": "BOOLEAN",
+          "label": "strict_duration",
+          "widget": {
+            "name": "strict_duration"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            56
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Video Slice",
+        "widget_ue_connectable": {
+          "duration": true
+        }
+      },
+      "widgets_values": [
+        0,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 3,
+      "pos": [
+        1320,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        315,
+        146
+      ],
+      "type": "Video Slice",
+      "flags": {},
+      "order": 14,
+      "inputs": [
+        {
+          "link": 3,
+          "name": "video",
+          "type": "VIDEO",
+          "label": "video"
+        },
+        {
+          "name": "start_time",
+          "type": "FLOAT",
+          "label": "start_time",
+          "widget": {
+            "name": "start_time"
+          }
+        },
+        {
+          "link": 110,
+          "name": "duration",
+          "type": "FLOAT",
+          "label": "duration",
+          "widget": {
+            "name": "duration"
+          }
+        },
+        {
+          "name": "strict_duration",
+          "type": "BOOLEAN",
+          "label": "strict_duration",
+          "widget": {
+            "name": "strict_duration"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            70
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Video Slice",
+        "widget_ue_connectable": {
+          "duration": true
+        }
+      },
+      "widgets_values": [
+        15,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 4,
+      "pos": [
+        1740,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        315,
+        146
+      ],
+      "type": "Video Slice",
+      "flags": {},
+      "order": 15,
+      "inputs": [
+        {
+          "link": 5,
+          "name": "video",
+          "type": "VIDEO",
+          "label": "video"
+        },
+        {
+          "name": "start_time",
+          "type": "FLOAT",
+          "label": "start_time",
+          "widget": {
+            "name": "start_time"
+          }
+        },
+        {
+          "link": 111,
+          "name": "duration",
+          "type": "FLOAT",
+          "label": "duration",
+          "widget": {
+            "name": "duration"
+          }
+        },
+        {
+          "name": "strict_duration",
+          "type": "BOOLEAN",
+          "label": "strict_duration",
+          "widget": {
+            "name": "strict_duration"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            84
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Video Slice",
+        "widget_ue_connectable": {
+          "duration": true
+        }
+      },
+      "widgets_values": [
+        30,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 5,
+      "pos": [
+        2160,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        315,
+        146
+      ],
+      "type": "Video Slice",
+      "flags": {},
+      "order": 16,
+      "inputs": [
+        {
+          "link": 7,
+          "name": "video",
+          "type": "VIDEO",
+          "label": "video"
+        },
+        {
+          "name": "start_time",
+          "type": "FLOAT",
+          "label": "start_time",
+          "widget": {
+            "name": "start_time"
+          }
+        },
+        {
+          "link": 112,
+          "name": "duration",
+          "type": "FLOAT",
+          "label": "duration",
+          "widget": {
+            "name": "duration"
+          }
+        },
+        {
+          "name": "strict_duration",
+          "type": "BOOLEAN",
+          "label": "strict_duration",
+          "widget": {
+            "name": "strict_duration"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            98
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Video Slice",
+        "widget_ue_connectable": {
+          "duration": true
+        }
+      },
+      "widgets_values": [
+        45,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 6,
+      "pos": [
+        60,
+        380
+      ],
+      "mode": 0,
+      "size": [
+        320,
+        314
+      ],
+      "type": "LoadImage",
+      "flags": {},
+      "order": 1,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "label": "image",
+          "widget": {
+            "name": "image"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "label": "IMAGE",
+          "links": [
+            57,
+            71,
+            85,
+            99
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "label": "MASK"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 7,
+      "pos": [
+        60,
+        700
+      ],
+      "mode": 0,
+      "size": [
+        320,
+        314
+      ],
+      "type": "LoadImage",
+      "flags": {},
+      "order": 2,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "label": "image",
+          "widget": {
+            "name": "image"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "label": "IMAGE",
+          "links": [
+            58,
+            72,
+            86,
+            100
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "label": "MASK"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 8,
+      "pos": [
+        60,
+        1020
+      ],
+      "mode": 0,
+      "size": [
+        320,
+        314
+      ],
+      "type": "LoadImage",
+      "flags": {},
+      "order": 3,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "label": "image",
+          "widget": {
+            "name": "image"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "label": "IMAGE",
+          "links": [
+            59,
+            73,
+            87,
+            101
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "label": "MASK"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 9,
+      "pos": [
+        60,
+        1340
+      ],
+      "mode": 0,
+      "size": [
+        320,
+        314
+      ],
+      "type": "LoadImage",
+      "flags": {},
+      "order": 4,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "label": "image",
+          "widget": {
+            "name": "image"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "label": "IMAGE",
+          "links": [
+            60,
+            74,
+            88,
+            102
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "label": "MASK"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 10,
+      "pos": [
+        60,
+        1660
+      ],
+      "mode": 0,
+      "size": [
+        320,
+        314
+      ],
+      "type": "LoadImage",
+      "flags": {},
+      "order": 5,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "COMBO",
+          "label": "image",
+          "widget": {
+            "name": "image"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "label": "IMAGE",
+          "links": [
+            61,
+            75,
+            89,
+            103
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "label": "MASK"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
+    },
+    {
+      "id": 11,
+      "pos": [
+        60,
+        1980
+      ],
+      "mode": 0,
+      "size": [
+        320,
+        166
+      ],
+      "type": "LoadAudio",
+      "flags": {},
+      "order": 6,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "COMBO",
+          "label": "audio",
+          "widget": {
+            "name": "audio"
+          }
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "AUDIOUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "label": "AUDIO",
+          "links": [
+            62,
+            76,
+            90,
+            104
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "",
+        null,
+        null
+      ]
+    },
+    {
+      "id": 12,
+      "pos": [
+        60,
+        2300
+      ],
+      "mode": 0,
+      "size": [
+        400,
+        160
+      ],
+      "type": "PrimitiveStringMultiline",
+      "flags": {},
+      "order": 7,
+      "inputs": [
+        {
+          "name": "value",
+          "type": "STRING",
+          "label": "value",
+          "widget": {
+            "name": "value"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "label": "STRING",
+          "links": [
+            63,
+            77,
+            91,
+            105
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PrimitiveStringMultiline",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "保持原有镜头运动与主体动作结构，画面重生成为黄昏暖色调，主体形象参考参考图1，服装细节参考参考图2，场景氛围参考参考图3，构图参考参考图4，配色调性参考参考图5，背景音乐与环境音参考音频，电影级质感"
+      ]
+    },
+    {
+      "id": 17,
+      "pos": [
+        3000,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        340,
+        380
+      ],
+      "type": "VideoConcatenate",
+      "flags": {},
+      "order": 25,
+      "inputs": [
+        {
+          "link": 66,
+          "name": "video_1",
+          "type": "VIDEO",
+          "label": "video_1",
+          "shape": 7
+        },
+        {
+          "link": 80,
+          "name": "video_2",
+          "type": "VIDEO",
+          "label": "video_2",
+          "shape": 7
+        },
+        {
+          "link": 94,
+          "name": "video_3",
+          "type": "VIDEO",
+          "label": "video_3",
+          "shape": 7
+        },
+        {
+          "link": 108,
+          "name": "video_4",
+          "type": "VIDEO",
+          "label": "video_4",
+          "shape": 7
+        },
+        {
+          "name": "video_5",
+          "type": "VIDEO",
+          "label": "video_5",
+          "shape": 7
+        },
+        {
+          "name": "video_6",
+          "type": "VIDEO",
+          "label": "video_6",
+          "shape": 7
+        },
+        {
+          "name": "video_7",
+          "type": "VIDEO",
+          "label": "video_7",
+          "shape": 7
+        },
+        {
+          "name": "video_8",
+          "type": "VIDEO",
+          "label": "video_8",
+          "shape": 7
+        },
+        {
+          "name": "video_9",
+          "type": "VIDEO",
+          "label": "video_9",
+          "shape": 7
+        },
+        {
+          "name": "video_10",
+          "type": "VIDEO",
+          "label": "video_10",
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            45
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoConcatenate",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 18,
+      "pos": [
+        3420,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        210,
+        204
+      ],
+      "type": "SaveVideo",
+      "flags": {},
+      "order": 26,
+      "inputs": [
+        {
+          "link": 45,
+          "name": "video",
+          "type": "VIDEO",
+          "label": "video"
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "label": "filename_prefix",
+          "widget": {
+            "name": "filename_prefix"
+          }
+        },
+        {
+          "name": "format",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "label": "format",
+          "widget": {
+            "name": "format"
+          }
+        },
+        {
+          "name": "codec",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "label": "codec",
+          "widget": {
+            "name": "codec"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video_url",
+          "type": "STRING",
+          "label": "video_url"
+        },
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "label": "video"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SaveVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "h3_allref_60s_final",
+        "auto",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 19,
+      "pos": [
+        60,
+        2620
+      ],
+      "mode": 0,
+      "size": [
+        315,
+        106
+      ],
+      "type": "PrimitiveFloat",
+      "flags": {},
+      "order": 8,
+      "inputs": [
+        {
+          "name": "value",
+          "type": "FLOAT",
+          "label": "value",
+          "widget": {
+            "name": "value"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "label": "FLOAT"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PrimitiveFloat",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        60
+      ]
+    },
+    {
+      "id": 27,
+      "pos": [
+        420,
+        120
+      ],
+      "mode": 0,
+      "size": [
+        345.0298767089844,
+        106
+      ],
+      "type": "RHMiniMaxH3ModelLoader",
+      "flags": {},
+      "order": 9,
+      "inputs": [
+        {
+          "name": "transformer_path",
+          "type": "COMBO",
+          "label": "transformer_path",
+          "widget": {
+            "name": "transformer_path"
+          }
+        },
+        {
+          "name": "adapter",
+          "type": "COMBO",
+          "label": "adapter",
+          "widget": {
+            "name": "adapter"
+          }
+        },
+        {
+          "name": "lora_strength",
+          "type": "FLOAT",
+          "label": "lora_strength",
+          "widget": {
+            "name": "lora_strength"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "h3_model",
+          "type": "MINIMAX_H3_DIRECT_MODEL",
+          "label": "h3_model",
+          "links": [
+            53,
+            67,
+            81,
+            95
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RHMiniMaxH3ModelLoader",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "MiniMax-H3-Ref2VA-int8_convrot.safetensors",
+        "minimax_h3_ref2v_turbo_4step_v0.1_bf16.safetensors",
+        1
+      ]
+    },
+    {
+      "id": 28,
+      "pos": [
+        420,
+        300
+      ],
+      "mode": 0,
+      "size": [
+        373.0435485839844,
+        58
+      ],
+      "type": "RHMiniMaxH3TextEncoderLoader",
+      "flags": {},
+      "order": 10,
+      "inputs": [
+        {
+          "name": "text_encoder_path",
+          "type": "COMBO",
+          "label": "text_encoder_path",
+          "widget": {
+            "name": "text_encoder_path"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "h3_text_encoder",
+          "type": "MINIMAX_H3_TEXT_ENCODER",
+          "label": "h3_text_encoder",
+          "links": [
+            54,
+            68,
+            82,
+            96
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RHMiniMaxH3TextEncoderLoader",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "qwen3-vl-32b-int8_convrot.safetensors"
+      ]
+    },
+    {
+      "id": 29,
+      "pos": [
+        420,
+        480
+      ],
+      "mode": 0,
+      "size": [
+        366.5562438964844,
+        82
+      ],
+      "type": "RHMiniMaxH3VAELoader",
+      "flags": {},
+      "order": 11,
+      "inputs": [
+        {
+          "name": "video_vae_path",
+          "type": "COMBO",
+          "label": "video_vae_path",
+          "widget": {
+            "name": "video_vae_path"
+          }
+        },
+        {
+          "name": "audio_vae_path",
+          "type": "COMBO",
+          "label": "audio_vae_path",
+          "widget": {
+            "name": "audio_vae_path"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "h3_vae_bundle",
+          "type": "MINIMAX_H3_VAE_BUNDLE",
+          "label": "h3_vae_bundle",
+          "links": [
+            55,
+            69,
+            83,
+            97
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RHMiniMaxH3VAELoader",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "MiniMax-H3-video_vae.safetensors",
+        "MiniMax-H3-audio_vae.safetensors"
+      ]
+    },
+    {
+      "id": 30,
+      "pos": [
+        1320,
+        380
+      ],
+      "mode": 0,
+      "size": [
+        350.1285095214844,
+        684
+      ],
+      "type": "RHMiniMaxH3RefGen",
+      "flags": {},
+      "order": 17,
+      "inputs": [
+        {
+          "link": 53,
+          "name": "h3_model",
+          "type": "MINIMAX_H3_DIRECT_MODEL",
+          "label": "h3_model",
+          "shape": 7
+        },
+        {
+          "link": 54,
+          "name": "h3_text_encoder",
+          "type": "MINIMAX_H3_TEXT_ENCODER",
+          "label": "h3_text_encoder",
+          "shape": 7
+        },
+        {
+          "link": 55,
+          "name": "h3_vae_bundle",
+          "type": "MINIMAX_H3_VAE_BUNDLE",
+          "label": "h3_vae_bundle",
+          "shape": 7
+        },
+        {
+          "link": 57,
+          "name": "images.image_0",
+          "type": "IMAGE",
+          "label": "参考图 1 (Image-1)",
+          "shape": 7
+        },
+        {
+          "link": 58,
+          "name": "images.image_1",
+          "type": "IMAGE",
+          "label": "参考图 2 (Image-2)",
+          "shape": 7
+        },
+        {
+          "link": 59,
+          "name": "images.image_2",
+          "type": "IMAGE",
+          "label": "参考图 3 (Image-3)",
+          "shape": 7
+        },
+        {
+          "link": 60,
+          "name": "images.image_3",
+          "type": "IMAGE",
+          "label": "参考图 4 (Image-4)",
+          "shape": 7
+        },
+        {
+          "link": 61,
+          "name": "images.image_4",
+          "type": "IMAGE",
+          "label": "参考图 5 (Image-5)",
+          "shape": 7
+        },
+        {
+          "name": "images.image_5",
+          "type": "IMAGE",
+          "label": "参考图 6 (Image-6)",
+          "shape": 7
+        },
+        {
+          "link": 56,
+          "name": "videos.video_0",
+          "type": "VIDEO",
+          "label": "videos.video_0",
+          "shape": 7
+        },
+        {
+          "name": "videos.video_1",
+          "type": "VIDEO",
+          "label": "videos.video_1",
+          "shape": 7
+        },
+        {
+          "link": 62,
+          "name": "audios.audio_0",
+          "type": "AUDIO",
+          "label": "audios.audio_0",
+          "shape": 7
+        },
+        {
+          "name": "audios.audio_1",
+          "type": "AUDIO",
+          "label": "audios.audio_1",
+          "shape": 7
+        },
+        {
+          "name": "sampler_config",
+          "type": "MINIMAX_H3_SAMPLER_CONFIG",
+          "label": "sampler_config",
+          "shape": 7
+        },
+        {
+          "link": 63,
+          "name": "prompt",
+          "type": "STRING",
+          "label": "prompt",
+          "widget": {
+            "name": "prompt"
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "type": "COMBO",
+          "label": "aspect_ratio",
+          "widget": {
+            "name": "aspect_ratio"
+          }
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "label": "width",
+          "widget": {
+            "name": "width"
+          }
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "label": "height",
+          "widget": {
+            "name": "height"
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "type": "FLOAT",
+          "label": "duration_seconds",
+          "widget": {
+            "name": "duration_seconds"
+          }
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "label": "seed",
+          "widget": {
+            "name": "seed"
+          }
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "label": "steps",
+          "widget": {
+            "name": "steps"
+          }
+        },
+        {
+          "name": "video_shift",
+          "type": "FLOAT",
+          "label": "video_shift",
+          "widget": {
+            "name": "video_shift"
+          }
+        },
+        {
+          "name": "audio_shift",
+          "type": "FLOAT",
+          "label": "audio_shift",
+          "widget": {
+            "name": "audio_shift"
+          }
+        },
+        {
+          "name": "sampler_mode",
+          "type": "COMBO",
+          "label": "sampler_mode",
+          "widget": {
+            "name": "sampler_mode"
+          }
+        },
+        {
+          "name": "accel",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "label": "accel",
+          "widget": {
+            "name": "accel"
+          }
+        },
+        {
+          "name": "ref_image_size",
+          "type": "COMBO",
+          "label": "ref_image_size",
+          "shape": 7,
+          "widget": {
+            "name": "ref_image_size"
+          }
+        },
+        {
+          "name": "allow_accel_with_res_multistep",
+          "type": "BOOLEAN",
+          "label": "allow_accel_with_res_multistep",
+          "shape": 7,
+          "widget": {
+            "name": "allow_accel_with_res_multistep"
+          }
+        },
+        {
+          "name": "attention_backend",
+          "type": "COMBO",
+          "label": "attention_backend",
+          "shape": 7,
+          "widget": {
+            "name": "attention_backend"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "frames",
+          "type": "IMAGE",
+          "label": "frames",
+          "links": [
+            64
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "links": [
+            65
+          ]
+        },
+        {
+          "name": "av_latent",
+          "type": "MINIMAX_H3_AV_LATENT",
+          "label": "av_latent"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RHMiniMaxH3RefGen",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "",
+        "16:9",
+        832,
+        480,
+        15,
+        42,
+        "randomize",
+        4,
+        12,
+        3,
+        "res_multistep",
+        "auto",
+        "match",
+        false,
+        "auto"
+      ]
+    },
+    {
+      "id": 31,
+      "pos": [
+        1740,
+        500
+      ],
+      "mode": 0,
+      "size": [
+        270,
+        150
+      ],
+      "type": "CreateVideo",
+      "flags": {},
+      "order": 21,
+      "inputs": [
+        {
+          "link": 64,
+          "name": "images",
+          "type": "IMAGE",
+          "label": "images"
+        },
+        {
+          "link": 65,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "shape": 7
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "label": "fps",
+          "widget": {
+            "name": "fps"
+          }
+        },
+        {
+          "name": "bit_depth",
+          "type": "COMBO",
+          "label": "bit_depth",
+          "shape": 7,
+          "widget": {
+            "name": "bit_depth"
+          }
+        },
+        {
+          "name": "color_space",
+          "type": "COMBO",
+          "label": "color_space",
+          "shape": 7,
+          "widget": {
+            "name": "color_space"
+          }
+        },
+        {
+          "name": "codec",
+          "type": "COMBO",
+          "label": "codec",
+          "shape": 7,
+          "widget": {
+            "name": "codec"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            66
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CreateVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        24,
+        8,
+        "sRGB",
+        "none"
+      ]
+    },
+    {
+      "id": 32,
+      "pos": [
+        1740,
+        380
+      ],
+      "mode": 0,
+      "size": [
+        350.1285095214844,
+        684
+      ],
+      "type": "RHMiniMaxH3RefGen",
+      "flags": {},
+      "order": 18,
+      "inputs": [
+        {
+          "link": 67,
+          "name": "h3_model",
+          "type": "MINIMAX_H3_DIRECT_MODEL",
+          "label": "h3_model",
+          "shape": 7
+        },
+        {
+          "link": 68,
+          "name": "h3_text_encoder",
+          "type": "MINIMAX_H3_TEXT_ENCODER",
+          "label": "h3_text_encoder",
+          "shape": 7
+        },
+        {
+          "link": 69,
+          "name": "h3_vae_bundle",
+          "type": "MINIMAX_H3_VAE_BUNDLE",
+          "label": "h3_vae_bundle",
+          "shape": 7
+        },
+        {
+          "link": 71,
+          "name": "images.image_0",
+          "type": "IMAGE",
+          "label": "参考图 1 (Image-1)",
+          "shape": 7
+        },
+        {
+          "link": 72,
+          "name": "images.image_1",
+          "type": "IMAGE",
+          "label": "参考图 2 (Image-2)",
+          "shape": 7
+        },
+        {
+          "link": 73,
+          "name": "images.image_2",
+          "type": "IMAGE",
+          "label": "参考图 3 (Image-3)",
+          "shape": 7
+        },
+        {
+          "link": 74,
+          "name": "images.image_3",
+          "type": "IMAGE",
+          "label": "参考图 4 (Image-4)",
+          "shape": 7
+        },
+        {
+          "link": 75,
+          "name": "images.image_4",
+          "type": "IMAGE",
+          "label": "参考图 5 (Image-5)",
+          "shape": 7
+        },
+        {
+          "name": "images.image_5",
+          "type": "IMAGE",
+          "label": "参考图 6 (Image-6)",
+          "shape": 7
+        },
+        {
+          "link": 70,
+          "name": "videos.video_0",
+          "type": "VIDEO",
+          "label": "videos.video_0",
+          "shape": 7
+        },
+        {
+          "name": "videos.video_1",
+          "type": "VIDEO",
+          "label": "videos.video_1",
+          "shape": 7
+        },
+        {
+          "link": 76,
+          "name": "audios.audio_0",
+          "type": "AUDIO",
+          "label": "audios.audio_0",
+          "shape": 7
+        },
+        {
+          "name": "audios.audio_1",
+          "type": "AUDIO",
+          "label": "audios.audio_1",
+          "shape": 7
+        },
+        {
+          "name": "sampler_config",
+          "type": "MINIMAX_H3_SAMPLER_CONFIG",
+          "label": "sampler_config",
+          "shape": 7
+        },
+        {
+          "link": 77,
+          "name": "prompt",
+          "type": "STRING",
+          "label": "prompt",
+          "widget": {
+            "name": "prompt"
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "type": "COMBO",
+          "label": "aspect_ratio",
+          "widget": {
+            "name": "aspect_ratio"
+          }
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "label": "width",
+          "widget": {
+            "name": "width"
+          }
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "label": "height",
+          "widget": {
+            "name": "height"
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "type": "FLOAT",
+          "label": "duration_seconds",
+          "widget": {
+            "name": "duration_seconds"
+          }
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "label": "seed",
+          "widget": {
+            "name": "seed"
+          }
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "label": "steps",
+          "widget": {
+            "name": "steps"
+          }
+        },
+        {
+          "name": "video_shift",
+          "type": "FLOAT",
+          "label": "video_shift",
+          "widget": {
+            "name": "video_shift"
+          }
+        },
+        {
+          "name": "audio_shift",
+          "type": "FLOAT",
+          "label": "audio_shift",
+          "widget": {
+            "name": "audio_shift"
+          }
+        },
+        {
+          "name": "sampler_mode",
+          "type": "COMBO",
+          "label": "sampler_mode",
+          "widget": {
+            "name": "sampler_mode"
+          }
+        },
+        {
+          "name": "accel",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "label": "accel",
+          "widget": {
+            "name": "accel"
+          }
+        },
+        {
+          "name": "ref_image_size",
+          "type": "COMBO",
+          "label": "ref_image_size",
+          "shape": 7,
+          "widget": {
+            "name": "ref_image_size"
+          }
+        },
+        {
+          "name": "allow_accel_with_res_multistep",
+          "type": "BOOLEAN",
+          "label": "allow_accel_with_res_multistep",
+          "shape": 7,
+          "widget": {
+            "name": "allow_accel_with_res_multistep"
+          }
+        },
+        {
+          "name": "attention_backend",
+          "type": "COMBO",
+          "label": "attention_backend",
+          "shape": 7,
+          "widget": {
+            "name": "attention_backend"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "frames",
+          "type": "IMAGE",
+          "label": "frames",
+          "links": [
+            78
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "links": [
+            79
+          ]
+        },
+        {
+          "name": "av_latent",
+          "type": "MINIMAX_H3_AV_LATENT",
+          "label": "av_latent"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RHMiniMaxH3RefGen",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "",
+        "16:9",
+        832,
+        480,
+        15,
+        42,
+        "randomize",
+        4,
+        12,
+        3,
+        "res_multistep",
+        "auto",
+        "match",
+        false,
+        "auto"
+      ]
+    },
+    {
+      "id": 33,
+      "pos": [
+        2160,
+        500
+      ],
+      "mode": 0,
+      "size": [
+        270,
+        150
+      ],
+      "type": "CreateVideo",
+      "flags": {},
+      "order": 22,
+      "inputs": [
+        {
+          "link": 78,
+          "name": "images",
+          "type": "IMAGE",
+          "label": "images"
+        },
+        {
+          "link": 79,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "shape": 7
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "label": "fps",
+          "widget": {
+            "name": "fps"
+          }
+        },
+        {
+          "name": "bit_depth",
+          "type": "COMBO",
+          "label": "bit_depth",
+          "shape": 7,
+          "widget": {
+            "name": "bit_depth"
+          }
+        },
+        {
+          "name": "color_space",
+          "type": "COMBO",
+          "label": "color_space",
+          "shape": 7,
+          "widget": {
+            "name": "color_space"
+          }
+        },
+        {
+          "name": "codec",
+          "type": "COMBO",
+          "label": "codec",
+          "shape": 7,
+          "widget": {
+            "name": "codec"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            80
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CreateVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        24,
+        8,
+        "sRGB",
+        "none"
+      ]
+    },
+    {
+      "id": 34,
+      "pos": [
+        2160,
+        380
+      ],
+      "mode": 0,
+      "size": [
+        350.1285095214844,
+        684
+      ],
+      "type": "RHMiniMaxH3RefGen",
+      "flags": {},
+      "order": 19,
+      "inputs": [
+        {
+          "link": 81,
+          "name": "h3_model",
+          "type": "MINIMAX_H3_DIRECT_MODEL",
+          "label": "h3_model",
+          "shape": 7
+        },
+        {
+          "link": 82,
+          "name": "h3_text_encoder",
+          "type": "MINIMAX_H3_TEXT_ENCODER",
+          "label": "h3_text_encoder",
+          "shape": 7
+        },
+        {
+          "link": 83,
+          "name": "h3_vae_bundle",
+          "type": "MINIMAX_H3_VAE_BUNDLE",
+          "label": "h3_vae_bundle",
+          "shape": 7
+        },
+        {
+          "link": 85,
+          "name": "images.image_0",
+          "type": "IMAGE",
+          "label": "参考图 1 (Image-1)",
+          "shape": 7
+        },
+        {
+          "link": 86,
+          "name": "images.image_1",
+          "type": "IMAGE",
+          "label": "参考图 2 (Image-2)",
+          "shape": 7
+        },
+        {
+          "link": 87,
+          "name": "images.image_2",
+          "type": "IMAGE",
+          "label": "参考图 3 (Image-3)",
+          "shape": 7
+        },
+        {
+          "link": 88,
+          "name": "images.image_3",
+          "type": "IMAGE",
+          "label": "参考图 4 (Image-4)",
+          "shape": 7
+        },
+        {
+          "link": 89,
+          "name": "images.image_4",
+          "type": "IMAGE",
+          "label": "参考图 5 (Image-5)",
+          "shape": 7
+        },
+        {
+          "name": "images.image_5",
+          "type": "IMAGE",
+          "label": "参考图 6 (Image-6)",
+          "shape": 7
+        },
+        {
+          "link": 84,
+          "name": "videos.video_0",
+          "type": "VIDEO",
+          "label": "videos.video_0",
+          "shape": 7
+        },
+        {
+          "name": "videos.video_1",
+          "type": "VIDEO",
+          "label": "videos.video_1",
+          "shape": 7
+        },
+        {
+          "link": 90,
+          "name": "audios.audio_0",
+          "type": "AUDIO",
+          "label": "audios.audio_0",
+          "shape": 7
+        },
+        {
+          "name": "audios.audio_1",
+          "type": "AUDIO",
+          "label": "audios.audio_1",
+          "shape": 7
+        },
+        {
+          "name": "sampler_config",
+          "type": "MINIMAX_H3_SAMPLER_CONFIG",
+          "label": "sampler_config",
+          "shape": 7
+        },
+        {
+          "link": 91,
+          "name": "prompt",
+          "type": "STRING",
+          "label": "prompt",
+          "widget": {
+            "name": "prompt"
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "type": "COMBO",
+          "label": "aspect_ratio",
+          "widget": {
+            "name": "aspect_ratio"
+          }
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "label": "width",
+          "widget": {
+            "name": "width"
+          }
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "label": "height",
+          "widget": {
+            "name": "height"
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "type": "FLOAT",
+          "label": "duration_seconds",
+          "widget": {
+            "name": "duration_seconds"
+          }
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "label": "seed",
+          "widget": {
+            "name": "seed"
+          }
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "label": "steps",
+          "widget": {
+            "name": "steps"
+          }
+        },
+        {
+          "name": "video_shift",
+          "type": "FLOAT",
+          "label": "video_shift",
+          "widget": {
+            "name": "video_shift"
+          }
+        },
+        {
+          "name": "audio_shift",
+          "type": "FLOAT",
+          "label": "audio_shift",
+          "widget": {
+            "name": "audio_shift"
+          }
+        },
+        {
+          "name": "sampler_mode",
+          "type": "COMBO",
+          "label": "sampler_mode",
+          "widget": {
+            "name": "sampler_mode"
+          }
+        },
+        {
+          "name": "accel",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "label": "accel",
+          "widget": {
+            "name": "accel"
+          }
+        },
+        {
+          "name": "ref_image_size",
+          "type": "COMBO",
+          "label": "ref_image_size",
+          "shape": 7,
+          "widget": {
+            "name": "ref_image_size"
+          }
+        },
+        {
+          "name": "allow_accel_with_res_multistep",
+          "type": "BOOLEAN",
+          "label": "allow_accel_with_res_multistep",
+          "shape": 7,
+          "widget": {
+            "name": "allow_accel_with_res_multistep"
+          }
+        },
+        {
+          "name": "attention_backend",
+          "type": "COMBO",
+          "label": "attention_backend",
+          "shape": 7,
+          "widget": {
+            "name": "attention_backend"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "frames",
+          "type": "IMAGE",
+          "label": "frames",
+          "links": [
+            92
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "links": [
+            93
+          ]
+        },
+        {
+          "name": "av_latent",
+          "type": "MINIMAX_H3_AV_LATENT",
+          "label": "av_latent"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RHMiniMaxH3RefGen",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "",
+        "16:9",
+        832,
+        480,
+        15,
+        42,
+        "randomize",
+        4,
+        12,
+        3,
+        "res_multistep",
+        "auto",
+        "match",
+        false,
+        "auto"
+      ]
+    },
+    {
+      "id": 35,
+      "pos": [
+        2580,
+        500
+      ],
+      "mode": 0,
+      "size": [
+        270,
+        150
+      ],
+      "type": "CreateVideo",
+      "flags": {},
+      "order": 23,
+      "inputs": [
+        {
+          "link": 92,
+          "name": "images",
+          "type": "IMAGE",
+          "label": "images"
+        },
+        {
+          "link": 93,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "shape": 7
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "label": "fps",
+          "widget": {
+            "name": "fps"
+          }
+        },
+        {
+          "name": "bit_depth",
+          "type": "COMBO",
+          "label": "bit_depth",
+          "shape": 7,
+          "widget": {
+            "name": "bit_depth"
+          }
+        },
+        {
+          "name": "color_space",
+          "type": "COMBO",
+          "label": "color_space",
+          "shape": 7,
+          "widget": {
+            "name": "color_space"
+          }
+        },
+        {
+          "name": "codec",
+          "type": "COMBO",
+          "label": "codec",
+          "shape": 7,
+          "widget": {
+            "name": "codec"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            94
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CreateVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        24,
+        8,
+        "sRGB",
+        "none"
+      ]
+    },
+    {
+      "id": 36,
+      "pos": [
+        2580,
+        60
+      ],
+      "mode": 0,
+      "size": [
+        350.1285095214844,
+        684
+      ],
+      "type": "RHMiniMaxH3RefGen",
+      "flags": {},
+      "order": 20,
+      "inputs": [
+        {
+          "link": 95,
+          "name": "h3_model",
+          "type": "MINIMAX_H3_DIRECT_MODEL",
+          "label": "h3_model",
+          "shape": 7
+        },
+        {
+          "link": 96,
+          "name": "h3_text_encoder",
+          "type": "MINIMAX_H3_TEXT_ENCODER",
+          "label": "h3_text_encoder",
+          "shape": 7
+        },
+        {
+          "link": 97,
+          "name": "h3_vae_bundle",
+          "type": "MINIMAX_H3_VAE_BUNDLE",
+          "label": "h3_vae_bundle",
+          "shape": 7
+        },
+        {
+          "link": 99,
+          "name": "images.image_0",
+          "type": "IMAGE",
+          "label": "参考图 1 (Image-1)",
+          "shape": 7
+        },
+        {
+          "link": 100,
+          "name": "images.image_1",
+          "type": "IMAGE",
+          "label": "参考图 2 (Image-2)",
+          "shape": 7
+        },
+        {
+          "link": 101,
+          "name": "images.image_2",
+          "type": "IMAGE",
+          "label": "参考图 3 (Image-3)",
+          "shape": 7
+        },
+        {
+          "link": 102,
+          "name": "images.image_3",
+          "type": "IMAGE",
+          "label": "参考图 4 (Image-4)",
+          "shape": 7
+        },
+        {
+          "link": 103,
+          "name": "images.image_4",
+          "type": "IMAGE",
+          "label": "参考图 5 (Image-5)",
+          "shape": 7
+        },
+        {
+          "name": "images.image_5",
+          "type": "IMAGE",
+          "label": "参考图 6 (Image-6)",
+          "shape": 7
+        },
+        {
+          "link": 98,
+          "name": "videos.video_0",
+          "type": "VIDEO",
+          "label": "videos.video_0",
+          "shape": 7
+        },
+        {
+          "name": "videos.video_1",
+          "type": "VIDEO",
+          "label": "videos.video_1",
+          "shape": 7
+        },
+        {
+          "link": 104,
+          "name": "audios.audio_0",
+          "type": "AUDIO",
+          "label": "audios.audio_0",
+          "shape": 7
+        },
+        {
+          "name": "audios.audio_1",
+          "type": "AUDIO",
+          "label": "audios.audio_1",
+          "shape": 7
+        },
+        {
+          "name": "sampler_config",
+          "type": "MINIMAX_H3_SAMPLER_CONFIG",
+          "label": "sampler_config",
+          "shape": 7
+        },
+        {
+          "link": 105,
+          "name": "prompt",
+          "type": "STRING",
+          "label": "prompt",
+          "widget": {
+            "name": "prompt"
+          }
+        },
+        {
+          "name": "aspect_ratio",
+          "type": "COMBO",
+          "label": "aspect_ratio",
+          "widget": {
+            "name": "aspect_ratio"
+          }
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "label": "width",
+          "widget": {
+            "name": "width"
+          }
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "label": "height",
+          "widget": {
+            "name": "height"
+          }
+        },
+        {
+          "name": "duration_seconds",
+          "type": "FLOAT",
+          "label": "duration_seconds",
+          "widget": {
+            "name": "duration_seconds"
+          }
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "label": "seed",
+          "widget": {
+            "name": "seed"
+          }
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "label": "steps",
+          "widget": {
+            "name": "steps"
+          }
+        },
+        {
+          "name": "video_shift",
+          "type": "FLOAT",
+          "label": "video_shift",
+          "widget": {
+            "name": "video_shift"
+          }
+        },
+        {
+          "name": "audio_shift",
+          "type": "FLOAT",
+          "label": "audio_shift",
+          "widget": {
+            "name": "audio_shift"
+          }
+        },
+        {
+          "name": "sampler_mode",
+          "type": "COMBO",
+          "label": "sampler_mode",
+          "widget": {
+            "name": "sampler_mode"
+          }
+        },
+        {
+          "name": "accel",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "label": "accel",
+          "widget": {
+            "name": "accel"
+          }
+        },
+        {
+          "name": "ref_image_size",
+          "type": "COMBO",
+          "label": "ref_image_size",
+          "shape": 7,
+          "widget": {
+            "name": "ref_image_size"
+          }
+        },
+        {
+          "name": "allow_accel_with_res_multistep",
+          "type": "BOOLEAN",
+          "label": "allow_accel_with_res_multistep",
+          "shape": 7,
+          "widget": {
+            "name": "allow_accel_with_res_multistep"
+          }
+        },
+        {
+          "name": "attention_backend",
+          "type": "COMBO",
+          "label": "attention_backend",
+          "shape": 7,
+          "widget": {
+            "name": "attention_backend"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "frames",
+          "type": "IMAGE",
+          "label": "frames",
+          "links": [
+            106
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "links": [
+            107
+          ]
+        },
+        {
+          "name": "av_latent",
+          "type": "MINIMAX_H3_AV_LATENT",
+          "label": "av_latent"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RHMiniMaxH3RefGen",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "",
+        "16:9",
+        832,
+        480,
+        15,
+        42,
+        "randomize",
+        4,
+        12,
+        3,
+        "res_multistep",
+        "auto",
+        "match",
+        false,
+        "auto"
+      ]
+    },
+    {
+      "id": 37,
+      "pos": [
+        3000,
+        180
+      ],
+      "mode": 0,
+      "size": [
+        270,
+        150
+      ],
+      "type": "CreateVideo",
+      "flags": {},
+      "order": 24,
+      "inputs": [
+        {
+          "link": 106,
+          "name": "images",
+          "type": "IMAGE",
+          "label": "images"
+        },
+        {
+          "link": 107,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "shape": 7
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "label": "fps",
+          "widget": {
+            "name": "fps"
+          }
+        },
+        {
+          "name": "bit_depth",
+          "type": "COMBO",
+          "label": "bit_depth",
+          "shape": 7,
+          "widget": {
+            "name": "bit_depth"
+          }
+        },
+        {
+          "name": "color_space",
+          "type": "COMBO",
+          "label": "color_space",
+          "shape": 7,
+          "widget": {
+            "name": "color_space"
+          }
+        },
+        {
+          "name": "codec",
+          "type": "COMBO",
+          "label": "codec",
+          "shape": 7,
+          "widget": {
+            "name": "codec"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "label": "VIDEO",
+          "links": [
+            108
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CreateVideo",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        24,
+        8,
+        "sRGB",
+        "none"
+      ]
+    },
+    {
+      "id": 38,
+      "pos": [
+        580,
+        -60
+      ],
+      "mode": 0,
+      "size": [
+        270,
+        58
+      ],
+      "type": "PrimitiveFloat",
+      "flags": {},
+      "order": 12,
+      "inputs": [
+        {
+          "name": "value",
+          "type": "FLOAT",
+          "label": "value",
+          "widget": {
+            "name": "value"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "label": "FLOAT",
+          "links": [
+            109,
+            110,
+            111,
+            112
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PrimitiveFloat",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        15
+      ]
+    }
+  ],
+  "config": {},
+  "groups": [],
+  "version": 0.4,
+  "revision": 0,
+  "last_link_id": 112,
+  "last_node_id": 38
+}

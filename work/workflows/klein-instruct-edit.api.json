@@ -1,0 +1,313 @@
+{
+  "1": {
+    "_meta": {
+      "title": "Load Diffusion Model"
+    },
+    "inputs": {
+      "unet_name": "flux-2-klein-base-9b.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader"
+  },
+  "2": {
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    },
+    "inputs": {
+      "noise": [
+        "3",
+        0
+      ],
+      "guider": [
+        "4",
+        0
+      ],
+      "sigmas": [
+        "12",
+        0
+      ],
+      "sampler": [
+        "10",
+        0
+      ],
+      "latent_image": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "3": {
+    "_meta": {
+      "title": "RandomNoise"
+    },
+    "inputs": {
+      "noise_seed": 789658204763574
+    },
+    "class_type": "RandomNoise"
+  },
+  "4": {
+    "_meta": {
+      "title": "CFG Guider"
+    },
+    "inputs": {
+      "cfg": 4.0,
+      "model": [
+        "1",
+        0
+      ],
+      "negative": [
+        "38",
+        0
+      ],
+      "positive": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "CFGGuider"
+  },
+  "5": {
+    "_meta": {
+      "title": "VAE Decode"
+    },
+    "inputs": {
+      "vae": [
+        "6",
+        0
+      ],
+      "samples": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "6": {
+    "_meta": {
+      "title": "Load VAE"
+    },
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "7": {
+    "_meta": {
+      "title": "Load CLIP"
+    },
+    "inputs": {
+      "type": "flux2",
+      "device": "default",
+      "clip_name": "qwen_3_8b.safetensors"
+    },
+    "class_type": "CLIPLoader"
+  },
+  "8": {
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    },
+    "inputs": {
+      "clip": [
+        "7",
+        0
+      ],
+      "text": "将图2这款包包自然地合成到图1模特身上，包包要看起来像是真实背在身上的，而不是P上去的。注意包包带子与身体的贴合度。\n"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "9": {
+    "_meta": {
+      "title": "Conditioning Zero Out"
+    },
+    "inputs": {
+      "conditioning": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut"
+  },
+  "10": {
+    "_meta": {
+      "title": "KSamplerSelect"
+    },
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect"
+  },
+  "11": {
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    },
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage"
+  },
+  "12": {
+    "_meta": {
+      "title": "Flux2Scheduler"
+    },
+    "inputs": {
+      "steps": 20,
+      "width": 1024,
+      "height": 1024
+    },
+    "class_type": "Flux2Scheduler"
+  },
+  "13": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "0f283cb657acfa1ff207f4dcb871ca840fb71205b430fa4b956e1548e559a573.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "17": {
+    "_meta": {
+      "title": "Set Reference Latent"
+    },
+    "inputs": {
+      "latent": [
+        "19",
+        0
+      ],
+      "conditioning": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent"
+  },
+  "18": {
+    "_meta": {
+      "title": "Set Reference Latent"
+    },
+    "inputs": {
+      "latent": [
+        "23",
+        0
+      ],
+      "conditioning": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent"
+  },
+  "19": {
+    "_meta": {
+      "title": "VAE Encode"
+    },
+    "inputs": {
+      "vae": [
+        "6",
+        0
+      ],
+      "pixels": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "VAEEncode"
+  },
+  "20": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "110b0dc052f3b2ee038e8a93022a34c23fefb8b6bdf9ed62aec5d3f9de9d9786.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "22": {
+    "_meta": {
+      "title": "Get Image Size"
+    },
+    "inputs": {
+      "image": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "GetImageSize"
+  },
+  "23": {
+    "_meta": {
+      "title": "VAE Encode"
+    },
+    "inputs": {
+      "vae": [
+        "6",
+        0
+      ],
+      "pixels": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "VAEEncode"
+  },
+  "29": {
+    "_meta": {
+      "title": "Save Image"
+    },
+    "inputs": {
+      "images": [
+        "5",
+        0
+      ],
+      "filename_prefix": "ComfyUI"
+    },
+    "class_type": "SaveImage"
+  },
+  "38": {
+    "_meta": {
+      "title": "Set Reference Latent"
+    },
+    "inputs": {
+      "latent": [
+        "19",
+        0
+      ],
+      "conditioning": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent"
+  },
+  "40": {
+    "_meta": {
+      "title": "🔧 Image Resize"
+    },
+    "inputs": {
+      "image": [
+        "13",
+        0
+      ],
+      "largest_size": 1920,
+      "upscale_method": "bicubic"
+    },
+    "class_type": "ImageScaleToMaxDimension"
+  },
+  "41": {
+    "_meta": {
+      "title": "🔧 Image Resize"
+    },
+    "inputs": {
+      "image": [
+        "20",
+        0
+      ],
+      "largest_size": 1920,
+      "upscale_method": "bicubic"
+    },
+    "class_type": "ImageScaleToMaxDimension"
+  }
+}

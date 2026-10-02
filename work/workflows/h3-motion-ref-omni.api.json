@@ -1,0 +1,309 @@
+{
+  "92": {
+    "_meta": {
+      "title": "Save Video"
+    },
+    "inputs": {
+      "codec": "auto",
+      "video": [
+        "130",
+        0
+      ],
+      "format": "auto",
+      "format.codec": "auto",
+      "filename_prefix": "video/MiniMax_H3",
+      "fw_video_preview": ""
+    },
+    "class_type": "SaveVideo"
+  },
+  "115": {
+    "_meta": {
+      "title": "Resolution Selector (Size)"
+    },
+    "inputs": {
+      "multiple": 32,
+      "megapixels": 0.9,
+      "aspect_ratio": "9:16 (Portrait Widescreen)"
+    },
+    "class_type": "ResolutionSelector"
+  },
+  "119": {
+    "_meta": {
+      "title": "Load VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "120": {
+    "_meta": {
+      "title": "Load VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "121": {
+    "_meta": {
+      "title": "VAE Decode Audio"
+    },
+    "inputs": {
+      "vae": [
+        "120",
+        0
+      ],
+      "samples": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio"
+  },
+  "122": {
+    "_meta": {
+      "title": "VAE Decode"
+    },
+    "inputs": {
+      "vae": [
+        "119",
+        0
+      ],
+      "samples": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "123": {
+    "_meta": {
+      "title": "KSamplerSelect"
+    },
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect"
+  },
+  "124": {
+    "_meta": {
+      "title": "BasicScheduler"
+    },
+    "inputs": {
+      "model": [
+        "127",
+        0
+      ],
+      "steps": 8,
+      "denoise": 1,
+      "scheduler": "simple"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "125": {
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    },
+    "inputs": {
+      "noise": [
+        "129",
+        0
+      ],
+      "guider": [
+        "126",
+        0
+      ],
+      "sigmas": [
+        "124",
+        0
+      ],
+      "sampler": [
+        "123",
+        0
+      ],
+      "latent_image": [
+        "136",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "126": {
+    "_meta": {
+      "title": "Basic Guider"
+    },
+    "inputs": {
+      "model": [
+        "127",
+        0
+      ],
+      "conditioning": [
+        "136",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "127": {
+    "_meta": {
+      "title": "Load Diffusion Model"
+    },
+    "inputs": {
+      "unet_name": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader"
+  },
+  "128": {
+    "_meta": {
+      "title": "Load CLIP"
+    },
+    "inputs": {
+      "type": "minimax",
+      "device": "default",
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    },
+    "class_type": "CLIPLoader"
+  },
+  "129": {
+    "_meta": {
+      "title": "RandomNoise"
+    },
+    "inputs": {
+      "noise_seed": 84
+    },
+    "class_type": "RandomNoise"
+  },
+  "130": {
+    "_meta": {
+      "title": "Create Video"
+    },
+    "inputs": {
+      "fps": 24,
+      "audio": [
+        "121",
+        0
+      ],
+      "codec": "none",
+      "images": [
+        "122",
+        0
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB"
+    },
+    "class_type": "CreateVideo"
+  },
+  "131": {
+    "_meta": {
+      "title": "Math Expression"
+    },
+    "inputs": {
+      "values.a": [
+        "132",
+        0
+      ],
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17"
+    },
+    "class_type": "ComfyMathExpression"
+  },
+  "132": {
+    "_meta": {
+      "title": "Float (Duration)"
+    },
+    "inputs": {
+      "value": 8.4
+    },
+    "class_type": "PrimitiveFloat"
+  },
+  "136": {
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    },
+    "inputs": {
+      "vae": [
+        "119",
+        0
+      ],
+      "clip": [
+        "128",
+        0
+      ],
+      "width": [
+        "115",
+        0
+      ],
+      "height": [
+        "115",
+        1
+      ],
+      "length": [
+        "131",
+        1
+      ],
+      "prompt": "<Subject 1> is the scene from <Picture1>\n<Subject 2> is the character from <Picture 2>\n<Video 1> provides only complete dance choreography, pose sequence, body rhythm, hand gestures, leg movement, facial‑expression timing, full‑body framing, fixed‑camera behavior, 8.38‑second temporal structure.\n<Audio 1> is synchronized audio track embedded in <Video 1>.\n\nGenerate <Subject 1> performing full dance choreography from <Video 1> inside <Subject 2>. Keep character identity from <Picture 1>, scene identity and objects from <Picture 2>, dance timing and synchronized music from <Video 1>. Remove original dancer and original hallway.\n\nVertical 9:16 fixed‑camera full‑body shot. Single continuous shot, exact 8.38s duration. <Subject 1> in center open floor space facing camera, full body and feet always in frame. Frame‑accurate reproduction of source dance: match every beat, pause, foot placement, balance change, knee bend, hip shift, shoulder rhythm, elbow angle, wrist rotation, finger gesture, head tilt, gaze, blink, facial expression and all pose transitions. Natural cloth‑movement physics, realistic ground contact, shadows match scene lighting.\n\nIntegrate character naturally into scene, correct lighting, perspective and reflections. Recompose wide reference scene vertically, no horizontal compression, reserve empty floor space for performer.\n\nFully preserve <Audio 1> original music, beats, sound effects. Synchronize all body movements to audio beats, add subtle foot‑contact and fabric rustle matching scene acoustics. No replace, remix or retime music.\n\nNo subtitles, logos, watermarks, text overlays. Forbid identity drift, duplicate limbs, wrong leg bending, sliding/floating feet, fused fingers, jittery hands, background distortion, object duplication, facial glitches. Remove original dancer and source hallway completely.",
+      "audio_vae": [
+        "120",
+        0
+      ],
+      "ref_image_size": "match",
+      "ref_audios.ref_audio_0": [
+        "211",
+        1
+      ],
+      "ref_images.ref_image_0": [
+        "137",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "139",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "211",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo"
+  },
+  "137": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "api/370a2c4fae8c5ce32582cd7586de418c09f724fe3417966c372dff9004d2213d.jpg"
+    },
+    "class_type": "LoadImage"
+  },
+  "139": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "api/86b14f3c85fdeff8cb41e7c3ab137e2d0453a0bb233eeddd148a40ad8b002a66.jpg"
+    },
+    "class_type": "LoadImage"
+  },
+  "210": {
+    "_meta": {
+      "title": "参考视频"
+    },
+    "inputs": {
+      "file": "api/1ce5ef773fa75626b3929089ddc7babaf6f7299fc99d10225bf876f0e5f74ed8.mp4"
+    },
+    "class_type": "LoadVideo"
+  },
+  "211": {
+    "_meta": {
+      "title": "拆视频"
+    },
+    "inputs": {
+      "video": [
+        "210",
+        0
+      ]
+    },
+    "class_type": "GetVideoComponents"
+  }
+}

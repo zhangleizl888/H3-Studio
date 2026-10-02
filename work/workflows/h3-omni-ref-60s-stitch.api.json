@@ -1,0 +1,1007 @@
+{
+  "1": {
+    "_meta": {
+      "title": "Load Video"
+    },
+    "inputs": {
+      "file": "None",
+      "trim_time": "0",
+      "keep_audio": true
+    },
+    "class_type": "LoadVideo"
+  },
+  "2": {
+    "_meta": {
+      "title": "Trim Video"
+    },
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "duration": 15.0,
+      "start_time": 0,
+      "strict_duration": false
+    },
+    "class_type": "Video Slice"
+  },
+  "3": {
+    "_meta": {
+      "title": "Trim Video"
+    },
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "duration": 15.0,
+      "start_time": 15,
+      "strict_duration": false
+    },
+    "class_type": "Video Slice"
+  },
+  "4": {
+    "_meta": {
+      "title": "Trim Video"
+    },
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "duration": 15.0,
+      "start_time": 30,
+      "strict_duration": false
+    },
+    "class_type": "Video Slice"
+  },
+  "5": {
+    "_meta": {
+      "title": "Trim Video"
+    },
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "duration": 15.0,
+      "start_time": 45,
+      "strict_duration": false
+    },
+    "class_type": "Video Slice"
+  },
+  "6": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "example.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "7": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "example.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "8": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "example.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "9": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "example.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "10": {
+    "_meta": {
+      "title": "Load Image"
+    },
+    "inputs": {
+      "image": "example.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "11": {
+    "_meta": {
+      "title": "Load Audio"
+    },
+    "inputs": {
+      "audio": "",
+      "audioUI": ""
+    },
+    "class_type": "LoadAudio"
+  },
+  "17": {
+    "_meta": {
+      "title": "Video Concatenate"
+    },
+    "inputs": {
+      "codec": "auto",
+      "videos.video0": [
+        "31",
+        0
+      ],
+      "videos.video1": [
+        "33",
+        0
+      ],
+      "videos.video2": [
+        "35",
+        0
+      ],
+      "videos.video3": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "ConcatenateVideo"
+  },
+  "18": {
+    "_meta": {
+      "title": "Save Video"
+    },
+    "inputs": {
+      "codec": "auto",
+      "video": [
+        "17",
+        0
+      ],
+      "format": "auto",
+      "format.codec": "auto",
+      "filename_prefix": "h3_allref_60s_final",
+      "fw_video_preview": ""
+    },
+    "class_type": "SaveVideo"
+  },
+  "31": {
+    "_meta": {
+      "title": "Create Video"
+    },
+    "inputs": {
+      "fps": 24,
+      "audio": [
+        "52",
+        0
+      ],
+      "codec": "none",
+      "images": [
+        "51",
+        0
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB"
+    },
+    "class_type": "CreateVideo"
+  },
+  "33": {
+    "_meta": {
+      "title": "Create Video"
+    },
+    "inputs": {
+      "fps": 24,
+      "audio": [
+        "61",
+        0
+      ],
+      "codec": "none",
+      "images": [
+        "60",
+        0
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB"
+    },
+    "class_type": "CreateVideo"
+  },
+  "35": {
+    "_meta": {
+      "title": "Create Video"
+    },
+    "inputs": {
+      "fps": 24,
+      "audio": [
+        "70",
+        0
+      ],
+      "codec": "none",
+      "images": [
+        "69",
+        0
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB"
+    },
+    "class_type": "CreateVideo"
+  },
+  "37": {
+    "_meta": {
+      "title": "Create Video"
+    },
+    "inputs": {
+      "fps": 24,
+      "audio": [
+        "79",
+        0
+      ],
+      "codec": "none",
+      "images": [
+        "78",
+        0
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB"
+    },
+    "class_type": "CreateVideo"
+  },
+  "39": {
+    "_meta": {
+      "title": "H3 DiT"
+    },
+    "inputs": {
+      "unet_name": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader"
+  },
+  "40": {
+    "_meta": {
+      "title": "H3 加速 LoRA"
+    },
+    "inputs": {
+      "model": [
+        "39",
+        0
+      ],
+      "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 1.0
+    },
+    "class_type": "LoraLoaderModelOnly"
+  },
+  "41": {
+    "_meta": {
+      "title": "H3 文本编码器"
+    },
+    "inputs": {
+      "type": "minimax",
+      "device": "default",
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    },
+    "class_type": "CLIPLoader"
+  },
+  "42": {
+    "_meta": {
+      "title": "视频 VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "43": {
+    "_meta": {
+      "title": "音频 VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "44": {
+    "_meta": {
+      "title": "H3 参考生视频"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "clip": [
+        "41",
+        0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": 362,
+      "prompt": "保持原有镜头运动与主体动作结构，画面重生成为黄昏暖色调，主体形象参考参考图1，服装细节参考参考图2，场景氛围参考参考图3，构图参考参考图4，配色调性参考参考图5，背景音乐与环境音参考音频，电影级质感",
+      "audio_vae": [
+        "43",
+        0
+      ],
+      "ref_image_size": "match",
+      "ref_audios.ref_audio_0": [
+        "11",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "6",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "7",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "8",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "9",
+        0
+      ],
+      "ref_images.ref_image_4": [
+        "10",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo"
+  },
+  "45": {
+    "_meta": {
+      "title": "Sigma Shift"
+    },
+    "inputs": {
+      "model": [
+        "40",
+        0
+      ],
+      "shift_audio": 3.0,
+      "shift_video": 12.0
+    },
+    "class_type": "MiniMaxH3SigmaShift"
+  },
+  "46": {
+    "_meta": {
+      "title": "采样器"
+    },
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect"
+  },
+  "47": {
+    "_meta": {
+      "title": "σ 表"
+    },
+    "inputs": {
+      "model": [
+        "45",
+        0
+      ],
+      "steps": 4,
+      "denoise": 1.0,
+      "scheduler": "simple"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "48": {
+    "_meta": {
+      "title": "噪声种子"
+    },
+    "inputs": {
+      "noise_seed": 42
+    },
+    "class_type": "RandomNoise"
+  },
+  "49": {
+    "_meta": {
+      "title": "Guider"
+    },
+    "inputs": {
+      "model": [
+        "45",
+        0
+      ],
+      "conditioning": [
+        "44",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "50": {
+    "_meta": {
+      "title": "采样"
+    },
+    "inputs": {
+      "noise": [
+        "48",
+        0
+      ],
+      "guider": [
+        "49",
+        0
+      ],
+      "sigmas": [
+        "47",
+        0
+      ],
+      "sampler": [
+        "46",
+        0
+      ],
+      "latent_image": [
+        "44",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "51": {
+    "_meta": {
+      "title": "解码画面"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "samples": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "52": {
+    "_meta": {
+      "title": "解码音频"
+    },
+    "inputs": {
+      "vae": [
+        "43",
+        0
+      ],
+      "samples": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio"
+  },
+  "53": {
+    "_meta": {
+      "title": "H3 参考生视频"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "clip": [
+        "41",
+        0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": 362,
+      "prompt": "保持原有镜头运动与主体动作结构，画面重生成为黄昏暖色调，主体形象参考参考图1，服装细节参考参考图2，场景氛围参考参考图3，构图参考参考图4，配色调性参考参考图5，背景音乐与环境音参考音频，电影级质感",
+      "audio_vae": [
+        "43",
+        0
+      ],
+      "ref_image_size": "match",
+      "ref_audios.ref_audio_0": [
+        "11",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "6",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "7",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "8",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "9",
+        0
+      ],
+      "ref_images.ref_image_4": [
+        "10",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo"
+  },
+  "54": {
+    "_meta": {
+      "title": "Sigma Shift"
+    },
+    "inputs": {
+      "model": [
+        "40",
+        0
+      ],
+      "shift_audio": 3.0,
+      "shift_video": 12.0
+    },
+    "class_type": "MiniMaxH3SigmaShift"
+  },
+  "55": {
+    "_meta": {
+      "title": "采样器"
+    },
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect"
+  },
+  "56": {
+    "_meta": {
+      "title": "σ 表"
+    },
+    "inputs": {
+      "model": [
+        "54",
+        0
+      ],
+      "steps": 4,
+      "denoise": 1.0,
+      "scheduler": "simple"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "57": {
+    "_meta": {
+      "title": "噪声种子"
+    },
+    "inputs": {
+      "noise_seed": 42
+    },
+    "class_type": "RandomNoise"
+  },
+  "58": {
+    "_meta": {
+      "title": "Guider"
+    },
+    "inputs": {
+      "model": [
+        "54",
+        0
+      ],
+      "conditioning": [
+        "53",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "59": {
+    "_meta": {
+      "title": "采样"
+    },
+    "inputs": {
+      "noise": [
+        "57",
+        0
+      ],
+      "guider": [
+        "58",
+        0
+      ],
+      "sigmas": [
+        "56",
+        0
+      ],
+      "sampler": [
+        "55",
+        0
+      ],
+      "latent_image": [
+        "53",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "60": {
+    "_meta": {
+      "title": "解码画面"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "samples": [
+        "59",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "61": {
+    "_meta": {
+      "title": "解码音频"
+    },
+    "inputs": {
+      "vae": [
+        "43",
+        0
+      ],
+      "samples": [
+        "59",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio"
+  },
+  "62": {
+    "_meta": {
+      "title": "H3 参考生视频"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "clip": [
+        "41",
+        0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": 362,
+      "prompt": "保持原有镜头运动与主体动作结构，画面重生成为黄昏暖色调，主体形象参考参考图1，服装细节参考参考图2，场景氛围参考参考图3，构图参考参考图4，配色调性参考参考图5，背景音乐与环境音参考音频，电影级质感",
+      "audio_vae": [
+        "43",
+        0
+      ],
+      "ref_image_size": "match",
+      "ref_audios.ref_audio_0": [
+        "11",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "6",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "7",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "8",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "9",
+        0
+      ],
+      "ref_images.ref_image_4": [
+        "10",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo"
+  },
+  "63": {
+    "_meta": {
+      "title": "Sigma Shift"
+    },
+    "inputs": {
+      "model": [
+        "40",
+        0
+      ],
+      "shift_audio": 3.0,
+      "shift_video": 12.0
+    },
+    "class_type": "MiniMaxH3SigmaShift"
+  },
+  "64": {
+    "_meta": {
+      "title": "采样器"
+    },
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect"
+  },
+  "65": {
+    "_meta": {
+      "title": "σ 表"
+    },
+    "inputs": {
+      "model": [
+        "63",
+        0
+      ],
+      "steps": 4,
+      "denoise": 1.0,
+      "scheduler": "simple"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "66": {
+    "_meta": {
+      "title": "噪声种子"
+    },
+    "inputs": {
+      "noise_seed": 42
+    },
+    "class_type": "RandomNoise"
+  },
+  "67": {
+    "_meta": {
+      "title": "Guider"
+    },
+    "inputs": {
+      "model": [
+        "63",
+        0
+      ],
+      "conditioning": [
+        "62",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "68": {
+    "_meta": {
+      "title": "采样"
+    },
+    "inputs": {
+      "noise": [
+        "66",
+        0
+      ],
+      "guider": [
+        "67",
+        0
+      ],
+      "sigmas": [
+        "65",
+        0
+      ],
+      "sampler": [
+        "64",
+        0
+      ],
+      "latent_image": [
+        "62",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "69": {
+    "_meta": {
+      "title": "解码画面"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "samples": [
+        "68",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "70": {
+    "_meta": {
+      "title": "解码音频"
+    },
+    "inputs": {
+      "vae": [
+        "43",
+        0
+      ],
+      "samples": [
+        "68",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio"
+  },
+  "71": {
+    "_meta": {
+      "title": "H3 参考生视频"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "clip": [
+        "41",
+        0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": 362,
+      "prompt": "保持原有镜头运动与主体动作结构，画面重生成为黄昏暖色调，主体形象参考参考图1，服装细节参考参考图2，场景氛围参考参考图3，构图参考参考图4，配色调性参考参考图5，背景音乐与环境音参考音频，电影级质感",
+      "audio_vae": [
+        "43",
+        0
+      ],
+      "ref_image_size": "match",
+      "ref_audios.ref_audio_0": [
+        "11",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "6",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "7",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "8",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "9",
+        0
+      ],
+      "ref_images.ref_image_4": [
+        "10",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo"
+  },
+  "72": {
+    "_meta": {
+      "title": "Sigma Shift"
+    },
+    "inputs": {
+      "model": [
+        "40",
+        0
+      ],
+      "shift_audio": 3.0,
+      "shift_video": 12.0
+    },
+    "class_type": "MiniMaxH3SigmaShift"
+  },
+  "73": {
+    "_meta": {
+      "title": "采样器"
+    },
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect"
+  },
+  "74": {
+    "_meta": {
+      "title": "σ 表"
+    },
+    "inputs": {
+      "model": [
+        "72",
+        0
+      ],
+      "steps": 4,
+      "denoise": 1.0,
+      "scheduler": "simple"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "75": {
+    "_meta": {
+      "title": "噪声种子"
+    },
+    "inputs": {
+      "noise_seed": 42
+    },
+    "class_type": "RandomNoise"
+  },
+  "76": {
+    "_meta": {
+      "title": "Guider"
+    },
+    "inputs": {
+      "model": [
+        "72",
+        0
+      ],
+      "conditioning": [
+        "71",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "77": {
+    "_meta": {
+      "title": "采样"
+    },
+    "inputs": {
+      "noise": [
+        "75",
+        0
+      ],
+      "guider": [
+        "76",
+        0
+      ],
+      "sigmas": [
+        "74",
+        0
+      ],
+      "sampler": [
+        "73",
+        0
+      ],
+      "latent_image": [
+        "71",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "78": {
+    "_meta": {
+      "title": "解码画面"
+    },
+    "inputs": {
+      "vae": [
+        "42",
+        0
+      ],
+      "samples": [
+        "77",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "79": {
+    "_meta": {
+      "title": "解码音频"
+    },
+    "inputs": {
+      "vae": [
+        "43",
+        0
+      ],
+      "samples": [
+        "77",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio"
+  }
+}

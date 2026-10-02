@@ -1,0 +1,581 @@
+{
+  "115": {
+    "_meta": {
+      "title": "Resolution Selector (Size)"
+    },
+    "inputs": {
+      "multiple": 32,
+      "megapixels": 0.5,
+      "aspect_ratio": "9:16 (Portrait Widescreen)"
+    },
+    "class_type": "ResolutionSelector"
+  },
+  "128": {
+    "_meta": {
+      "title": "Load CLIP"
+    },
+    "inputs": {
+      "type": "minimax",
+      "device": "default",
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    },
+    "class_type": "CLIPLoader"
+  },
+  "131": {
+    "_meta": {
+      "title": "Math Expression"
+    },
+    "inputs": {
+      "values.a": [
+        "132",
+        0
+      ],
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17"
+    },
+    "class_type": "ComfyMathExpression"
+  },
+  "132": {
+    "_meta": {
+      "title": "Float (Duration)"
+    },
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat"
+  },
+  "136": {
+    "_meta": {
+      "title": "MiniMax H3 Reference to Video"
+    },
+    "inputs": {
+      "vae": [
+        "323",
+        0
+      ],
+      "clip": [
+        "128",
+        0
+      ],
+      "width": [
+        "115",
+        0
+      ],
+      "height": [
+        "115",
+        1
+      ],
+      "length": [
+        "131",
+        1
+      ],
+      "prompt": "subject_definitions:\n<Subject 1> is the young woman whose facial identity, pink hair color, and overall appearance come from <Picture 1>, with long pink hair, fair skin, large expressive eyes, and a slim build.\n<Subject 2> is the young woman whose facial identity, dark hair, and elegant demeanor come from <Picture 2>, with long flowing dark brown hair, fair skin, soft features, and a graceful build.\n<Subject 3> is the young woman whose facial identity, brown hair, and athletic look come from <Picture 3>, with brown hair tied back, fair skin, and a fit build.\n\nsummary:\n[reference generation] The target video follows the three young women from <Picture 1>, <Picture 2>, and <Picture 3> as they stroll along a narrow wooden boardwalk cutting through a vast summer lotus pond in full bloom, chatting casually about the lotus flowers. The camera tracks them from a side-and-slightly-behind angle at walking pace.\n\nretention_analysis:\n<Subject 1> (appears in [Shot 1]): partially_preserved - the pink hair color, fair skin, facial features, and slim build from <Picture 1> are retained; the original school uniform is replaced with a light summer outfit suitable for an outdoor boardwalk stroll.\n<Subject 2> (appears in [Shot 1]): partially_preserved - the long dark hair, fair skin, soft facial features, and graceful bearing from <Picture 2> are retained; the original indoor formal dress is replaced with a light summer outfit suitable for the outdoor setting.\n<Subject 3> (appears in [Shot 1]): partially_preserved - the brown hair color, fair skin, facial features, and athletic build from <Picture 3> are retained; the original gym attire is replaced with a light casual summer outfit.\n\ndetailed_description:\nThe target video uses a cinematic, live-action summer aesthetic with soft natural afternoon lighting and a warm but slightly diffused color palette that emphasizes the lush green pond, the warm wooden planks, and the soft pink and white of the lotus petals.\n\n[Shot 1] A wide tracking shot opens on a long, narrow wooden boardwalk that runs straight through a vast lotus pond, its weathered planks in a warm honey-brown tone with dark water visible between the gaps. Dense clusters of pink and white lotus flowers in full bloom stretch to the horizon on both sides, their large round leaves forming a continuous green carpet over the water, and tall green seed pods rising among the open blooms under a clear, slightly hazy summer sky. The three young women walk side by side along the boardwalk at a relaxed, unhurried pace. <Subject 1>, the young woman with long pink hair, wearing a light sleeveless white top and a flowing pale-blue skirt, walks on the left. <Subject 2>, the young woman with long flowing dark hair, wearing a cream-colored sleeveless dress that drapes softly around her knees, walks in the center. <Subject 3>, the young woman with brown hair in a loose half-up style, wearing a white linen shirt tucked into a soft beige midi skirt, walks on the right. The camera tracks them with a smooth side-follow motion at walking speed, keeping the three subjects in the lower-middle of the frame while the wooden planks of the boardwalk recede into the foreground, and the lotus pond fills both sides of the background with a shallow depth of field that softens the distant blooms into layered pink and green washes. <Subject 1> (S1) points toward a large lotus bloom on the left and says in a bright, excited voice: <d>[Chinese] 快看那边的荷花，开得好大！</d> <Subject 2> (S2) leans in with a gentle smile and replies in a soft, warm voice: <d>[Chinese] 真的诶，我们拍张照吧？</d> <Subject 3> (S3) nods enthusiastically and says in a lively, cheerful voice: <d>[Chinese] 好啊好啊，这风吹着太舒服了。</d> A gentle breeze moves loose strands of hair on all three women as lotus leaves and reeds rustle softly, and a few scattered pink petals drift across the frame near the lens. The three continue at an unhurried pace with light smiles, their silhouettes framed against the layered rows of pink lotus blooms behind them through the end of the shot.\n\noverall_soundscape:\nSoft outdoor summer ambience with distant bird calls, the gentle rustle of lotus leaves and reeds in a light breeze, light footfalls on the wooden boardwalk, and occasional soft laughter from the women.\n\nnon_diegetic_music:\nA warm acoustic-guitar arpeggio at a slow tempo, joined by light pizzicato strings and a soft pad underneath, with a gentle and serene feeling that swells softly and fades as the shot ends.\n",
+      "audio_vae": [
+        "325",
+        0
+      ],
+      "ref_image_size": "match",
+      "ref_audios.ref_audio_0": [
+        "416",
+        0
+      ],
+      "ref_audios.ref_audio_1": [
+        "417",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "411",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "412",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "413",
+        0
+      ],
+      "ref_videos.ref_video_0": [
+        "415",
+        0
+      ],
+      "ref_video_audios.ref_video_audio_0": [
+        "415",
+        1
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo"
+  },
+  "305": {
+    "_meta": {
+      "title": "BasicScheduler"
+    },
+    "inputs": {
+      "model": [
+        "338",
+        0
+      ],
+      "steps": 8,
+      "denoise": 1,
+      "scheduler": "beta"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "306": {
+    "_meta": {
+      "title": "H3 Sigma Refiner（本机等价）"
+    },
+    "inputs": {
+      "steps": 1,
+      "sigmas": [
+        "305",
+        0
+      ],
+      "spacing": "cosine",
+      "end_at_sigma": 0,
+      "start_at_sigma": 0.7
+    },
+    "class_type": "ExtendIntermediateSigmas"
+  },
+  "307": {
+    "_meta": {
+      "title": "SplitSigmas"
+    },
+    "inputs": {
+      "step": [
+        "369",
+        1
+      ],
+      "sigmas": [
+        "306",
+        0
+      ]
+    },
+    "class_type": "SplitSigmas"
+  },
+  "308": {
+    "_meta": {
+      "title": "H3 Sigma Refiner（本机等价）"
+    },
+    "inputs": {
+      "steps": 1,
+      "sigmas": [
+        "309",
+        0
+      ],
+      "spacing": "cosine",
+      "end_at_sigma": 0,
+      "start_at_sigma": 0.7
+    },
+    "class_type": "ExtendIntermediateSigmas"
+  },
+  "309": {
+    "_meta": {
+      "title": "BasicScheduler"
+    },
+    "inputs": {
+      "model": [
+        "331",
+        0
+      ],
+      "steps": 8,
+      "denoise": 1,
+      "scheduler": "beta"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "313": {
+    "_meta": {
+      "title": "SplitSigmas"
+    },
+    "inputs": {
+      "step": [
+        "369",
+        1
+      ],
+      "sigmas": [
+        "308",
+        0
+      ]
+    },
+    "class_type": "SplitSigmas"
+  },
+  "323": {
+    "_meta": {
+      "title": "Load VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "325": {
+    "_meta": {
+      "title": "Load VAE"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "327": {
+    "_meta": {
+      "title": "Load Diffusion Model"
+    },
+    "inputs": {
+      "unet_name": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader"
+  },
+  "330": {
+    "_meta": {
+      "title": "ModelSamplingMiniMaxH3"
+    },
+    "inputs": {
+      "model": [
+        "371",
+        0
+      ],
+      "shift_audio": 3,
+      "shift_video": 12
+    },
+    "class_type": "MiniMaxH3SigmaShift"
+  },
+  "331": {
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    },
+    "inputs": {
+      "model": [
+        "330",
+        0
+      ],
+      "attention": "comfy kitchen attention"
+    },
+    "class_type": "ModelAttentionBackend"
+  },
+  "333": {
+    "_meta": {
+      "title": "Load Diffusion Model"
+    },
+    "inputs": {
+      "unet_name": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader"
+  },
+  "336": {
+    "_meta": {
+      "title": "Load LoRA"
+    },
+    "inputs": {
+      "model": [
+        "372",
+        0
+      ],
+      "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 0.7500000000000001
+    },
+    "class_type": "LoraLoaderModelOnly"
+  },
+  "337": {
+    "_meta": {
+      "title": "ModelSamplingMiniMaxH3"
+    },
+    "inputs": {
+      "model": [
+        "336",
+        0
+      ],
+      "shift_audio": 3,
+      "shift_video": 12
+    },
+    "class_type": "MiniMaxH3SigmaShift"
+  },
+  "338": {
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    },
+    "inputs": {
+      "model": [
+        "337",
+        0
+      ],
+      "attention": "comfy kitchen attention"
+    },
+    "class_type": "ModelAttentionBackend"
+  },
+  "346": {
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    },
+    "inputs": {
+      "sigmas": [
+        "307",
+        0
+      ],
+      "latent_image": [
+        "136",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "348": {
+    "_meta": {
+      "title": "Separate AV Latent"
+    },
+    "inputs": {
+      "av_latent": [
+        "346",
+        1
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent"
+  },
+  "350": {
+    "_meta": {
+      "title": "Concat AV Latent"
+    },
+    "inputs": {
+      "audio_latent": [
+        "348",
+        1
+      ],
+      "video_latent": [
+        "348",
+        0
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent"
+  },
+  "351": {
+    "_meta": {
+      "title": "Basic Guider"
+    },
+    "inputs": {
+      "model": [
+        "338",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "354": {
+    "_meta": {
+      "title": "Basic Guider"
+    },
+    "inputs": {
+      "model": [
+        "331",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "357": {
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    },
+    "inputs": {
+      "guider": [
+        "354",
+        0
+      ],
+      "sigmas": [
+        "313",
+        1
+      ],
+      "latent_image": [
+        "350",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "359": {
+    "_meta": {
+      "title": "VAE Decode"
+    },
+    "inputs": {
+      "vae": [
+        "323",
+        0
+      ],
+      "samples": [
+        "357",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "361": {
+    "_meta": {
+      "title": "VAE Decode Audio"
+    },
+    "inputs": {
+      "vae": [
+        "325",
+        0
+      ],
+      "samples": [
+        "357",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio"
+  },
+  "363": {
+    "_meta": {
+      "title": "Create Video"
+    },
+    "inputs": {
+      "fps": 24,
+      "audio": [
+        "361",
+        0
+      ],
+      "codec": "none",
+      "images": [
+        "359",
+        0
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB"
+    },
+    "class_type": "CreateVideo"
+  },
+  "364": {
+    "_meta": {
+      "title": "Save Video"
+    },
+    "inputs": {
+      "codec": "auto",
+      "video": [
+        "363",
+        0
+      ],
+      "format": "auto",
+      "format.codec": "auto",
+      "filename_prefix": "video/MiniMax_H3",
+      "fw_video_preview": ""
+    },
+    "class_type": "SaveVideo"
+  },
+  "369": {
+    "_meta": {
+      "title": "Math Expression"
+    },
+    "inputs": {
+      "values.a": [
+        "370",
+        0
+      ],
+      "expression": "a/2"
+    },
+    "class_type": "ComfyMathExpression"
+  },
+  "370": {
+    "_meta": {
+      "title": "Integer（本机等价）"
+    },
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "PrimitiveInt"
+  },
+  "371": {
+    "_meta": {
+      "title": "Load LoRA"
+    },
+    "inputs": {
+      "model": [
+        "327",
+        0
+      ],
+      "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 0.75
+    },
+    "class_type": "LoraLoaderModelOnly"
+  },
+  "372": {
+    "_meta": {
+      "title": "Load LoRA"
+    },
+    "inputs": {
+      "model": [
+        "333",
+        0
+      ],
+      "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "strength_model": 0.75
+    },
+    "class_type": "LoraLoaderModelOnly"
+  },
+  "411": {
+    "_meta": {
+      "title": "参考素材 ref_images 第 1 个"
+    },
+    "inputs": {
+      "image": "fe3623dfe3402847541a0fc695eeaa1c6784652469c18d128ceb0184ba771a69.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "412": {
+    "_meta": {
+      "title": "参考素材 ref_images 第 2 个"
+    },
+    "inputs": {
+      "image": "efb5593c131e6314daa48cf85d4bfb7887751135702288da4e1ae0f557fe92c4.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "413": {
+    "_meta": {
+      "title": "参考素材 ref_images 第 3 个"
+    },
+    "inputs": {
+      "image": "61fcf4cd3f44cf5ff35b9d427a1b2e2f1d7b80b2de2946d3a4f74765b1c90c86.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "414": {
+    "_meta": {
+      "title": "参考素材 ref_videos 第 1 个"
+    },
+    "inputs": {
+      "file": "407cd6398aa781f23a738a75c9c24bf7bfa1f79faaf3d58284f93b5031d4a50b.mp4"
+    },
+    "class_type": "LoadVideo"
+  },
+  "415": {
+    "_meta": {
+      "title": "拆视频帧"
+    },
+    "inputs": {
+      "video": [
+        "414",
+        0
+      ]
+    },
+    "class_type": "GetVideoComponents"
+  },
+  "416": {
+    "_meta": {
+      "title": "参考素材 ref_audios 第 1 个"
+    },
+    "inputs": {
+      "audio": "ab9ad0d9972576d28adc7c69cd6b44860ac7a47286f3229d5a8baf8b8f43605d.wav"
+    },
+    "class_type": "LoadAudio"
+  },
+  "417": {
+    "_meta": {
+      "title": "参考素材 ref_audios 第 2 个"
+    },
+    "inputs": {
+      "audio": "d249ab4226325866722b2f3d748744733ae206716b7cb1ca4ae6233c35e9bd8d.wav"
+    },
+    "class_type": "LoadAudio"
+  }
+}

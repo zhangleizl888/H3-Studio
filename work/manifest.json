@@ -1,0 +1,1169 @@
+{
+  "package": "H3 Studio 工作流包",
+  "packageEn": "H3 Studio workflow bundle",
+  "schema": 1,
+  "exportedFrom": {
+    "library": "http://127.0.0.1:8788",
+    "workflowCount": 7,
+    "note": "导出机实例：本机 4090（local · http://127.0.0.1:8188）。requiredWeights 记的是那台机器 /object_info 报出来的真实文件名；换机器时这些名字必须一字不差地存在（导入的权重对齐不做近似匹配），或在「设置 → Server 与工作流」里重绑。"
+  },
+  "note": "这里的 *.api.json 是已经过本机等价改写、可直接执行的那一份；作者原始导出与逐条改写清单在数据库 workflows.graph_original / adaptations 两列。",
+  "noteEn": "Each *.api.json is the adapted, directly executable graph. The author's original export and the per-node rewrite log live in workflows.graph_original / adaptations.",
+  "workflows": [
+    {
+      "slug": "h3-firstlast-fast",
+      "name": "MiniMax H3 图文一键生视频（加速版）",
+      "description": "首帧 + 尾帧 + 提示词直接出一条 H3 短片，全程 EasyCache 加速。导演台逐镜头出片的主路径。",
+      "tags": [
+        "导入",
+        "H3",
+        "首尾帧出片"
+      ],
+      "taskKind": "video",
+      "family": "video",
+      "mode": "i2v",
+      "modeLabel": "图生视频",
+      "priority": 120,
+      "autoSelect": true,
+      "executesOn": "any",
+      "sourceFormat": "ui",
+      "verifiedAt": "2026-10-02T16:30:20.291865+00:00",
+      "files": {
+        "api": "workflows/h3-firstlast-fast.api.json",
+        "ui": "workflows/h3-firstlast-fast.ui.json"
+      },
+      "nodes": 20,
+      "slotCount": 30,
+      "requiredWeights": [
+        {
+          "key": "127.unet_name",
+          "role": "底模",
+          "classType": "UNETLoader",
+          "file": "MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "128.clip_name",
+          "role": "文本编码器",
+          "classType": "CLIPLoader",
+          "file": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "119.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_video_vae_fp16.safetensors",
+          "missing": false
+        },
+        {
+          "key": "120.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_audio_vae_fp32.safetensors",
+          "missing": false
+        }
+      ],
+      "customNodes": [],
+      "nodeClasses": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ComfyMathExpression",
+        "CreateVideo",
+        "EasyCache",
+        "KSamplerSelect",
+        "LoadImage",
+        "MiniMaxH3ImageToVideo",
+        "PrimitiveFloat",
+        "RandomNoise",
+        "ResolutionSelector",
+        "SamplerCustomAdvanced",
+        "SaveVideo",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader"
+      ],
+      "coreScan": true,
+      "adaptations": 31,
+      "pendingMedia": [
+        "139.image",
+        "206.image"
+      ],
+      "signals": [
+        {
+          "name": "prompt",
+          "type": "text",
+          "label": "提示词",
+          "required": true
+        },
+        {
+          "name": "first_frame",
+          "type": "image",
+          "label": "首帧",
+          "required": true
+        },
+        {
+          "name": "last_frame",
+          "type": "image",
+          "label": "尾帧",
+          "required": false
+        },
+        {
+          "name": "aspect_ratio",
+          "type": "text",
+          "label": "aspect_ratio",
+          "required": false
+        },
+        {
+          "name": "megapixels",
+          "type": "float",
+          "label": "megapixels",
+          "required": false
+        },
+        {
+          "name": "seconds",
+          "type": "float",
+          "label": "seconds",
+          "required": false
+        },
+        {
+          "name": "steps",
+          "type": "int",
+          "label": "采样步数",
+          "required": false
+        },
+        {
+          "name": "denoise",
+          "type": "int",
+          "label": "降噪强度",
+          "required": false
+        },
+        {
+          "name": "seed",
+          "type": "int",
+          "label": "随机种子",
+          "required": false
+        },
+        {
+          "name": "filename_prefix",
+          "type": "text",
+          "label": "输出路径前缀",
+          "required": false
+        }
+      ]
+    },
+    {
+      "slug": "h3-motion-ref-omni",
+      "name": "MiniMax H3 动作迁移·全能参考",
+      "description": "给一段参考视频（含它自己的音轨）+ 场景图 + 人物图，把动作节奏迁移到新画面上。",
+      "tags": [
+        "导入",
+        "H3",
+        "动作迁移"
+      ],
+      "taskKind": "video",
+      "family": "video",
+      "mode": "r2v",
+      "modeLabel": "全能参考",
+      "priority": 110,
+      "autoSelect": true,
+      "executesOn": "any",
+      "sourceFormat": "api",
+      "verifiedAt": "2026-10-02T16:42:24.047090+00:00",
+      "files": {
+        "api": "workflows/h3-motion-ref-omni.api.json",
+        "ui": "workflows/h3-motion-ref-omni.ui.json"
+      },
+      "nodes": 21,
+      "slotCount": 31,
+      "requiredWeights": [
+        {
+          "key": "127.unet_name",
+          "role": "底模",
+          "classType": "UNETLoader",
+          "file": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "128.clip_name",
+          "role": "文本编码器",
+          "classType": "CLIPLoader",
+          "file": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "119.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_video_vae_fp16.safetensors",
+          "missing": false
+        },
+        {
+          "key": "120.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_audio_vae_fp32.safetensors",
+          "missing": false
+        }
+      ],
+      "customNodes": [],
+      "nodeClasses": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ComfyMathExpression",
+        "CreateVideo",
+        "GetVideoComponents",
+        "KSamplerSelect",
+        "LoadImage",
+        "LoadVideo",
+        "MiniMaxH3ReferenceToVideo",
+        "PrimitiveFloat",
+        "RandomNoise",
+        "ResolutionSelector",
+        "SamplerCustomAdvanced",
+        "SaveVideo",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader"
+      ],
+      "coreScan": true,
+      "adaptations": 24,
+      "pendingMedia": [
+        "137.image",
+        "139.image"
+      ],
+      "signals": [
+        {
+          "name": "prompt",
+          "type": "text",
+          "label": "提示词",
+          "required": true
+        },
+        {
+          "name": "ref_images",
+          "type": "image",
+          "label": "参考图",
+          "required": false
+        },
+        {
+          "name": "ref_videos",
+          "type": "video",
+          "label": "参考视频",
+          "required": false
+        },
+        {
+          "name": "ref_audios",
+          "type": "audio",
+          "label": "参考音频",
+          "required": false
+        },
+        {
+          "name": "aspect_ratio",
+          "type": "text",
+          "label": "aspect_ratio",
+          "required": false
+        },
+        {
+          "name": "megapixels",
+          "type": "float",
+          "label": "megapixels",
+          "required": false
+        },
+        {
+          "name": "seconds",
+          "type": "float",
+          "label": "seconds",
+          "required": false
+        },
+        {
+          "name": "steps",
+          "type": "int",
+          "label": "采样步数",
+          "required": false
+        },
+        {
+          "name": "denoise",
+          "type": "int",
+          "label": "降噪强度",
+          "required": false
+        },
+        {
+          "name": "seed",
+          "type": "int",
+          "label": "随机种子",
+          "required": false
+        },
+        {
+          "name": "filename_prefix",
+          "type": "text",
+          "label": "输出路径前缀",
+          "required": false
+        }
+      ]
+    },
+    {
+      "slug": "h3-drama-omni-ref",
+      "name": "双模双采短剧助手·全能参考生成视频",
+      "description": "素材面板混装图/视频/音频，六路参考进 H3，另带一条 Qwen 图片分支用来换背景换人物。",
+      "tags": [
+        "导入",
+        "H3",
+        "短剧",
+        "多素材"
+      ],
+      "taskKind": "video",
+      "family": "video",
+      "mode": "r2v",
+      "modeLabel": "全能参考",
+      "priority": 100,
+      "autoSelect": true,
+      "executesOn": "any",
+      "sourceFormat": "api",
+      "verifiedAt": null,
+      "files": {
+        "api": "workflows/h3-drama-omni-ref.api.json",
+        "ui": "workflows/h3-drama-omni-ref.ui.json"
+      },
+      "nodes": 41,
+      "slotCount": 59,
+      "requiredWeights": [
+        {
+          "key": "327.unet_name",
+          "role": "底模",
+          "classType": "UNETLoader",
+          "file": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "333.unet_name",
+          "role": "底模",
+          "classType": "UNETLoader",
+          "file": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "128.clip_name",
+          "role": "文本编码器",
+          "classType": "CLIPLoader",
+          "file": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "323.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_video_vae_fp16.safetensors",
+          "missing": false
+        },
+        {
+          "key": "325.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_audio_vae_fp32.safetensors",
+          "missing": false
+        },
+        {
+          "key": "336.lora_name",
+          "role": "LoRA 适配器",
+          "classType": "LoraLoaderModelOnly",
+          "file": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "missing": false
+        },
+        {
+          "key": "371.lora_name",
+          "role": "LoRA 适配器",
+          "classType": "LoraLoaderModelOnly",
+          "file": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "missing": false
+        },
+        {
+          "key": "372.lora_name",
+          "role": "LoRA 适配器",
+          "classType": "LoraLoaderModelOnly",
+          "file": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "missing": false
+        }
+      ],
+      "customNodes": [],
+      "nodeClasses": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ComfyMathExpression",
+        "CreateVideo",
+        "ExtendIntermediateSigmas",
+        "GetVideoComponents",
+        "LTXVConcatAVLatent",
+        "LTXVSeparateAVLatent",
+        "LoadAudio",
+        "LoadImage",
+        "LoadVideo",
+        "LoraLoaderModelOnly",
+        "MiniMaxH3ReferenceToVideo",
+        "MiniMaxH3SigmaShift",
+        "ModelAttentionBackend",
+        "PrimitiveFloat",
+        "PrimitiveInt",
+        "ResolutionSelector",
+        "SamplerCustomAdvanced",
+        "SaveVideo",
+        "SplitSigmas",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader"
+      ],
+      "coreScan": true,
+      "adaptations": 37,
+      "pendingMedia": [
+        "411.image",
+        "412.image",
+        "413.image"
+      ],
+      "signals": [
+        {
+          "name": "prompt",
+          "type": "text",
+          "label": "提示词",
+          "required": true
+        },
+        {
+          "name": "ref_images",
+          "type": "image",
+          "label": "参考图",
+          "required": false
+        },
+        {
+          "name": "ref_videos",
+          "type": "video",
+          "label": "参考视频",
+          "required": false
+        },
+        {
+          "name": "ref_audios",
+          "type": "audio",
+          "label": "参考音频",
+          "required": false
+        },
+        {
+          "name": "ref_video_audios",
+          "type": "audio",
+          "label": "参考视频音轨",
+          "required": false
+        },
+        {
+          "name": "aspect_ratio",
+          "type": "text",
+          "label": "aspect_ratio",
+          "required": false
+        },
+        {
+          "name": "megapixels",
+          "type": "float",
+          "label": "megapixels",
+          "required": false
+        },
+        {
+          "name": "seconds",
+          "type": "float",
+          "label": "seconds",
+          "required": false
+        },
+        {
+          "name": "steps",
+          "type": "int",
+          "label": "采样步数",
+          "required": false
+        },
+        {
+          "name": "denoise",
+          "type": "int",
+          "label": "降噪强度",
+          "required": false
+        },
+        {
+          "name": "filename_prefix",
+          "type": "text",
+          "label": "输出路径前缀",
+          "required": false
+        }
+      ]
+    },
+    {
+      "slug": "h3-omni-ref-60s-stitch",
+      "name": "MiniMax H3 全能参考 60 秒·多素材拼接",
+      "description": "四段 15 秒参考生视频再拼成一条约 60 秒的成片。显存和耗时都很重，慎用自动选。",
+      "tags": [
+        "导入",
+        "H3",
+        "长片",
+        "拼接"
+      ],
+      "taskKind": "video",
+      "family": "video",
+      "mode": "r2v",
+      "modeLabel": "全能参考",
+      "priority": 90,
+      "autoSelect": true,
+      "executesOn": "any",
+      "sourceFormat": "api",
+      "verifiedAt": null,
+      "files": {
+        "api": "workflows/h3-omni-ref-60s-stitch.api.json",
+        "ui": "workflows/h3-omni-ref-60s-stitch.ui.json"
+      },
+      "nodes": 58,
+      "slotCount": 101,
+      "requiredWeights": [
+        {
+          "key": "39.unet_name",
+          "role": "底模",
+          "classType": "UNETLoader",
+          "file": "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "41.clip_name",
+          "role": "文本编码器",
+          "classType": "CLIPLoader",
+          "file": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+          "missing": false
+        },
+        {
+          "key": "42.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_video_vae_fp16.safetensors",
+          "missing": false
+        },
+        {
+          "key": "43.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "minimax_h3_audio_vae_fp32.safetensors",
+          "missing": false
+        },
+        {
+          "key": "40.lora_name",
+          "role": "LoRA 适配器",
+          "classType": "LoraLoaderModelOnly",
+          "file": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+          "missing": false
+        }
+      ],
+      "customNodes": [],
+      "nodeClasses": [
+        "BasicGuider",
+        "BasicScheduler",
+        "CLIPLoader",
+        "ConcatenateVideo",
+        "CreateVideo",
+        "KSamplerSelect",
+        "LoadAudio",
+        "LoadImage",
+        "LoadVideo",
+        "LoraLoaderModelOnly",
+        "MiniMaxH3ReferenceToVideo",
+        "MiniMaxH3SigmaShift",
+        "RandomNoise",
+        "SamplerCustomAdvanced",
+        "SaveVideo",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "VAELoader",
+        "Video Slice"
+      ],
+      "coreScan": true,
+      "adaptations": 11,
+      "pendingMedia": [],
+      "signals": [
+        {
+          "name": "prompt",
+          "type": "text",
+          "label": "提示词",
+          "required": true
+        },
+        {
+          "name": "ref_images",
+          "type": "image",
+          "label": "参考图",
+          "required": false
+        },
+        {
+          "name": "ref_videos",
+          "type": "video",
+          "label": "参考视频",
+          "required": false
+        },
+        {
+          "name": "ref_audios",
+          "type": "audio",
+          "label": "参考音频",
+          "required": false
+        },
+        {
+          "name": "width",
+          "type": "int",
+          "label": "宽",
+          "required": false
+        },
+        {
+          "name": "height",
+          "type": "int",
+          "label": "高",
+          "required": false
+        },
+        {
+          "name": "frames",
+          "type": "int",
+          "label": "帧数（17k+5）",
+          "required": false
+        },
+        {
+          "name": "steps",
+          "type": "int",
+          "label": "采样步数",
+          "required": false
+        },
+        {
+          "name": "denoise",
+          "type": "float",
+          "label": "降噪强度",
+          "required": false
+        },
+        {
+          "name": "seed",
+          "type": "int",
+          "label": "随机种子",
+          "required": false
+        },
+        {
+          "name": "filename_prefix",
+          "type": "text",
+          "label": "输出路径前缀",
+          "required": false
+        }
+      ]
+    },
+    {
+      "slug": "voice-clone-qwen3-tts",
+      "name": "声音克隆二合一（IndexTTS2 + Qwen3-TTS）",
+      "description": "参考音频 10 秒截段 → Whisper 转写参考文本 → Qwen3-TTS 音色克隆出目标台词。配音用。",
+      "tags": [
+        "导入",
+        "TTS",
+        "音色克隆"
+      ],
+      "taskKind": "audio",
+      "family": "audio",
+      "mode": "voice",
+      "modeLabel": "声音克隆",
+      "priority": 120,
+      "autoSelect": true,
+      "executesOn": "any",
+      "sourceFormat": "api",
+      "verifiedAt": "2026-10-02T03:37:24.537474+00:00",
+      "files": {
+        "api": "workflows/voice-clone-qwen3-tts.api.json",
+        "ui": "workflows/voice-clone-qwen3-tts.ui.json"
+      },
+      "nodes": 6,
+      "slotCount": 26,
+      "requiredWeights": [
+        {
+          "key": "43.model_choice",
+          "role": "模型",
+          "classType": "FB_Qwen3TTSVoiceClone",
+          "file": "0.6B",
+          "missing": false
+        },
+        {
+          "key": "44.model",
+          "role": "模型",
+          "classType": "Apply Whisper",
+          "file": "large-v3",
+          "missing": false
+        }
+      ],
+      "customNodes": [
+        "Apply Whisper",
+        "FB_Qwen3TTSVoiceClone"
+      ],
+      "nodeClasses": [
+        "Apply Whisper",
+        "FB_Qwen3TTSVoiceClone",
+        "LoadAudio",
+        "PreviewAudio",
+        "SaveAudioMP3",
+        "TrimAudioDuration"
+      ],
+      "coreScan": true,
+      "adaptations": 5,
+      "pendingMedia": [],
+      "signals": [
+        {
+          "name": "prompt",
+          "type": "text",
+          "label": "提示词",
+          "required": true
+        },
+        {
+          "name": "ref_audios",
+          "type": "audio",
+          "label": "参考音频",
+          "required": false
+        },
+        {
+          "name": "seed",
+          "type": "int",
+          "label": "随机种子",
+          "required": false
+        },
+        {
+          "name": "filename_prefix",
+          "type": "text",
+          "label": "输出路径前缀",
+          "required": false
+        },
+        {
+          "name": "language",
+          "type": "text",
+          "label": "language",
+          "required": false
+        },
+        {
+          "name": "ref_text",
+          "type": "text",
+          "label": "ref_text",
+          "required": false
+        },
+        {
+          "name": "temperature",
+          "type": "int",
+          "label": "temperature",
+          "required": false
+        },
+        {
+          "name": "x_vector_only",
+          "type": "bool",
+          "label": "x_vector_only",
+          "required": false
+        }
+      ]
+    },
+    {
+      "slug": "klein-character-sheet",
+      "name": "Klein 一键人物设定图 + 服装拆解",
+      "description": "一张人物图出三视图设定稿，并把身上的服装拆成单品图。角色定妆/服化道用。",
+      "tags": [
+        "导入",
+        "图片",
+        "设定图",
+        "服装拆解"
+      ],
+      "taskKind": "image",
+      "family": "image",
+      "mode": "i2i",
+      "modeLabel": "指令编辑",
+      "priority": 120,
+      "autoSelect": true,
+      "executesOn": "any",
+      "sourceFormat": "api",
+      "verifiedAt": "2026-10-02T13:24:24.039994+00:00",
+      "files": {
+        "api": "workflows/klein-character-sheet.api.json",
+        "ui": "workflows/klein-character-sheet.ui.json"
+      },
+      "nodes": 22,
+      "slotCount": 26,
+      "requiredWeights": [
+        {
+          "key": "5.unet_name",
+          "role": "底模",
+          "classType": "UNETLoader",
+          "file": "flux-2-klein-base-9b.safetensors",
+          "missing": false
+        },
+        {
+          "key": "6.clip_name",
+          "role": "文本编码器",
+          "classType": "CLIPLoader",
+          "file": "qwen_3_8b.safetensors",
+          "missing": false
+        },
+        {
+          "key": "7.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "flux2-vae.safetensors",
+          "missing": false
+        }
+      ],
+      "customNodes": [],
+      "nodeClasses": [
+        "AddTextPrefix",
+        "BatchImagesNode",
+        "CFGGuider",
+        "CLIPLoader",
+        "CLIPTextEncode",
+        "ConditioningZeroOut",
+        "EmptyFlux2LatentImage",
+        "Flux2Scheduler",
+        "ImageGrid",
+        "ImageScaleToTotalPixels",
+        "KSamplerSelect",
+        "LoadImage",
+        "PreviewImage",
+        "RandomNoise",
+        "ReferenceLatent",
+        "SamplerCustomAdvanced",
+        "SaveImage",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEEncode",
+        "VAELoader"
+      ],
+      "coreScan": true,
+      "adaptations": 12,
+      "pendingMedia": [
+        "17.image"
+      ],
+      "signals": [
+        {
+          "name": "prompt",
+          "type": "text",
+          "label": "提示词",
+          "required": true
+        },
+        {
+          "name": "prompt_extra",
+          "type": "text",
+          "label": "prompt_extra",
+          "required": false
+        },
+        {
+          "name": "ref_images",
+          "type": "image",
+          "label": "参考图",
+          "required": false
+        },
+        {
+          "name": "width",
+          "type": "int",
+          "label": "宽",
+          "required": false
+        },
+        {
+          "name": "height",
+          "type": "int",
+          "label": "高",
+          "required": false
+        },
+        {
+          "name": "cfg",
+          "type": "float",
+          "label": "CFG",
+          "required": false
+        },
+        {
+          "name": "seed",
+          "type": "int",
+          "label": "随机种子",
+          "required": false
+        },
+        {
+          "name": "filename_prefix",
+          "type": "text",
+          "label": "输出路径前缀",
+          "required": false
+        },
+        {
+          "name": "batch_size",
+          "type": "int",
+          "label": "批量数",
+          "required": false
+        }
+      ]
+    },
+    {
+      "slug": "klein-instruct-edit",
+      "name": "Klein 指令编辑（FLUX）",
+      "description": "按自然语言指令改图（换背景/换服装/局部替换），带参考图。改图用。",
+      "tags": [
+        "导入",
+        "图片",
+        "指令编辑"
+      ],
+      "taskKind": "image",
+      "family": "image",
+      "mode": "i2i",
+      "modeLabel": "指令编辑",
+      "priority": 110,
+      "autoSelect": true,
+      "executesOn": "any",
+      "sourceFormat": "api",
+      "verifiedAt": "2026-10-02T06:34:29.242287+00:00",
+      "files": {
+        "api": "workflows/klein-instruct-edit.api.json",
+        "ui": "workflows/klein-instruct-edit.ui.json"
+      },
+      "nodes": 23,
+      "slotCount": 23,
+      "requiredWeights": [
+        {
+          "key": "1.unet_name",
+          "role": "底模",
+          "classType": "UNETLoader",
+          "file": "flux-2-klein-base-9b.safetensors",
+          "missing": false
+        },
+        {
+          "key": "7.clip_name",
+          "role": "文本编码器",
+          "classType": "CLIPLoader",
+          "file": "qwen_3_8b.safetensors",
+          "missing": false
+        },
+        {
+          "key": "6.vae_name",
+          "role": "VAE",
+          "classType": "VAELoader",
+          "file": "flux2-vae.safetensors",
+          "missing": false
+        }
+      ],
+      "customNodes": [],
+      "nodeClasses": [
+        "CFGGuider",
+        "CLIPLoader",
+        "CLIPTextEncode",
+        "ConditioningZeroOut",
+        "EmptyFlux2LatentImage",
+        "Flux2Scheduler",
+        "GetImageSize",
+        "ImageScaleToMaxDimension",
+        "KSamplerSelect",
+        "LoadImage",
+        "RandomNoise",
+        "ReferenceLatent",
+        "SamplerCustomAdvanced",
+        "SaveImage",
+        "UNETLoader",
+        "VAEDecode",
+        "VAEEncode",
+        "VAELoader"
+      ],
+      "coreScan": true,
+      "adaptations": 8,
+      "pendingMedia": [
+        "13.image",
+        "20.image"
+      ],
+      "signals": [
+        {
+          "name": "prompt",
+          "type": "text",
+          "label": "提示词",
+          "required": true
+        },
+        {
+          "name": "ref_images",
+          "type": "image",
+          "label": "参考图",
+          "required": false
+        },
+        {
+          "name": "width",
+          "type": "int",
+          "label": "宽",
+          "required": false
+        },
+        {
+          "name": "height",
+          "type": "int",
+          "label": "高",
+          "required": false
+        },
+        {
+          "name": "cfg",
+          "type": "float",
+          "label": "CFG",
+          "required": false
+        },
+        {
+          "name": "seed",
+          "type": "int",
+          "label": "随机种子",
+          "required": false
+        },
+        {
+          "name": "filename_prefix",
+          "type": "text",
+          "label": "输出路径前缀",
+          "required": false
+        },
+        {
+          "name": "batch_size",
+          "type": "int",
+          "label": "批量数",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "builtinWorkflows": [
+    {
+      "id": "builtin:qwen_image",
+      "name": "Qwen-Image 出图",
+      "taskKind": "image",
+      "definedIn": "apps/api/app/gen/builtin_graphs.py + templates.py",
+      "packaged": false,
+      "note": "由后端代码按模板生成，不落 JSON 文件。权重按归一化模糊匹配自动挑：unet=qwen_image_2.1_int8_convrot（回落 bf16）／clip=qwen3vl_8b*／vae=qwen_image_2.1_vae*。"
+    },
+    {
+      "id": "builtin:h3_video",
+      "name": "MiniMax H3 出片",
+      "taskKind": "video",
+      "definedIn": "apps/api/app/gen/builtin_graphs.py + templates.py",
+      "packaged": false,
+      "note": "t2v / i2v / fl2v 三合一。unet=MiniMax_H3_FL2VA 或 Ref2VA_pruned_int8_convrot，clip=qwen3vl_32b_minimax_h3_int8_convrot，vae=minimax_h3_video_vae_fp16 + minimax_h3_audio_vae_fp32，turbo lora 有则加。"
+    },
+    {
+      "id": "builtin:h3_chain",
+      "name": "MiniMax H3 长片续拍",
+      "taskKind": "video",
+      "definedIn": "apps/api/app/gen/builtin_graphs.py（CHAIN_NODE=H3SeamlessChainSampler）",
+      "packaged": false,
+      "requiresCustomNode": "ComfyUI-minimaxH3-SequenceForge",
+      "note": "段间引导无缝续拍。少了这个节点包，只有长片功能不可用，逐镜头出片不受影响。"
+    }
+  ],
+  "prerequisites": {
+    "comfyui": {
+      "minVersion": "0.37.4",
+      "coreNodesUsed": [
+        "MiniMaxH3ImageToVideo",
+        "MiniMaxH3ReferenceToVideo",
+        "MiniMaxH3SigmaShift",
+        "MiniMaxH3AddGuide",
+        "EasyCache",
+        "ComfyMathExpression",
+        "ResolutionSelector",
+        "SaveVideo",
+        "QwenImage21Cache",
+        "TextEncodeQwenImage21",
+        "EmptyFlux2LatentImage",
+        "Flux2Scheduler",
+        "ReferenceLatent",
+        "SaveAudioMP3",
+        "TrimAudioDuration"
+      ],
+      "note": "H3 / Qwen-Image 2.1 / FLUX.2-klein 的核心节点都靠 ComfyUI 版本够新，老版本会在导入体检时报 unknown node。"
+    },
+    "customNodes": [
+      {
+        "dir": "ComfyUI-Whisper",
+        "repo": "https://github.com/yuvraj108c/ComfyUI-Whisper",
+        "provides": [
+          "Apply Whisper"
+        ],
+        "neededBy": [
+          "voice-clone-qwen3-tts"
+        ],
+        "pythonDeps": [
+          "openai-whisper",
+          "pillow",
+          "uuid",
+          "soundfile"
+        ],
+        "weights": [
+          "models/stt/whisper/large-v3.pt（图里默认档位；tiny…turbo 都可换）"
+        ]
+      },
+      {
+        "dir": "ComfyUI-Qwen-TTS",
+        "repo": "https://github.com/flybirdxx/ComfyUI-Qwen-TTS",
+        "provides": [
+          "FB_Qwen3TTSVoiceClone",
+          "FB_Qwen3TTSVoiceClonePrompt"
+        ],
+        "neededBy": [
+          "voice-clone-qwen3-tts"
+        ],
+        "pythonDeps": [
+          "torch",
+          "torchaudio",
+          "transformers>=4.57.0",
+          "librosa",
+          "soundfile",
+          "accelerate",
+          "numpy",
+          "einops",
+          "tiktoken",
+          "sentencepiece",
+          "sox",
+          "huggingface_hub"
+        ],
+        "weights": [
+          "models/qwen-tts/Qwen3-TTS-12Hz-0.6B-Base",
+          "…-0.6B-CustomVoice",
+          "…-Tokenizer-12Hz（0.6B 档；换 1.7B 要另下对应目录）"
+        ]
+      },
+      {
+        "dir": "ComfyUI-minimaxH3-SequenceForge",
+        "repo": null,
+        "provides": [
+          "H3SeamlessChainSampler",
+          "H3SeamDoctor"
+        ],
+        "neededBy": [
+          "内置 builtin:h3_chain 长片续拍"
+        ],
+        "pythonDeps": [],
+        "weights": []
+      }
+    ],
+    "weights": {
+      "unet/": [
+        "MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors",
+        "MiniMax_H3_Ref2VA_pruned_int8_convrot.safetensors",
+        "flux-2-klein-base-9b.safetensors"
+      ],
+      "diffusion_models/": [
+        "qwen_image_2.1_int8_convrot.safetensors",
+        "qwen_image_2.1_bf16.safetensors"
+      ],
+      "clip/": [
+        "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "qwen_3_8b.safetensors",
+        "qwen3vl_8b_bf16.safetensors",
+        "qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+        "qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors"
+      ],
+      "vae/": [
+        "minimax_h3_video_vae_fp16.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "flux2-vae.safetensors",
+        "qwen_image_2.1_vae_bf16.safetensors"
+      ],
+      "loras/": [
+        "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
+      ],
+      "stt/whisper/": [
+        "large-v3.pt"
+      ],
+      "qwen-tts/": [
+        "Qwen3-TTS-12Hz-0.6B-Base",
+        "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        "Qwen3-TTS-Tokenizer-12Hz"
+      ]
+    }
+  }
+}

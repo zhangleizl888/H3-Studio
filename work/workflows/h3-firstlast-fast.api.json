@@ -1,0 +1,288 @@
+{
+  "92": {
+    "_meta": {
+      "title": "SaveVideo"
+    },
+    "inputs": {
+      "video": [
+        "130",
+        0
+      ],
+      "format": "auto",
+      "filename_prefix": "video/MiniMax_H3"
+    },
+    "class_type": "SaveVideo"
+  },
+  "115": {
+    "_meta": {
+      "title": "ResolutionSelector"
+    },
+    "inputs": {
+      "multiple": 32,
+      "megapixels": 1.0,
+      "aspect_ratio": "4:3 (Standard)"
+    },
+    "class_type": "ResolutionSelector"
+  },
+  "119": {
+    "_meta": {
+      "title": "VAELoader"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "120": {
+    "_meta": {
+      "title": "VAELoader"
+    },
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "121": {
+    "_meta": {
+      "title": "VAEDecodeAudio"
+    },
+    "inputs": {
+      "vae": [
+        "120",
+        0
+      ],
+      "samples": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio"
+  },
+  "122": {
+    "_meta": {
+      "title": "VAEDecode"
+    },
+    "inputs": {
+      "vae": [
+        "119",
+        0
+      ],
+      "samples": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "123": {
+    "_meta": {
+      "title": "KSamplerSelect"
+    },
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect"
+  },
+  "124": {
+    "_meta": {
+      "title": "BasicScheduler"
+    },
+    "inputs": {
+      "model": [
+        "136",
+        0
+      ],
+      "steps": 25,
+      "denoise": 1,
+      "scheduler": "simple"
+    },
+    "class_type": "BasicScheduler"
+  },
+  "125": {
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    },
+    "inputs": {
+      "noise": [
+        "129",
+        0
+      ],
+      "guider": [
+        "126",
+        0
+      ],
+      "sigmas": [
+        "124",
+        0
+      ],
+      "sampler": [
+        "123",
+        0
+      ],
+      "latent_image": [
+        "131",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced"
+  },
+  "126": {
+    "_meta": {
+      "title": "BasicGuider"
+    },
+    "inputs": {
+      "model": [
+        "136",
+        0
+      ],
+      "conditioning": [
+        "131",
+        0
+      ]
+    },
+    "class_type": "BasicGuider"
+  },
+  "127": {
+    "_meta": {
+      "title": "UNETLoader"
+    },
+    "inputs": {
+      "unet_name": "MiniMax_H3_FL2VA_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader"
+  },
+  "128": {
+    "_meta": {
+      "title": "CLIPLoader"
+    },
+    "inputs": {
+      "type": "minimax",
+      "device": "default",
+      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    },
+    "class_type": "CLIPLoader"
+  },
+  "129": {
+    "_meta": {
+      "title": "RandomNoise"
+    },
+    "inputs": {
+      "noise_seed": 1028853415866009
+    },
+    "class_type": "RandomNoise"
+  },
+  "130": {
+    "_meta": {
+      "title": "CreateVideo"
+    },
+    "inputs": {
+      "fps": 24,
+      "audio": [
+        "121",
+        0
+      ],
+      "codec": "none",
+      "images": [
+        "122",
+        0
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB"
+    },
+    "class_type": "CreateVideo"
+  },
+  "131": {
+    "_meta": {
+      "title": "MiniMaxH3ImageToVideo"
+    },
+    "inputs": {
+      "vae": [
+        "119",
+        0
+      ],
+      "clip": [
+        "128",
+        0
+      ],
+      "width": [
+        "115",
+        0
+      ],
+      "height": [
+        "115",
+        1
+      ],
+      "length": [
+        "132",
+        1
+      ],
+      "prompt": "镜头缓慢匀速向前平移推进，黏土搭建林间林荫小路，满地黏土落叶，两旁蓬松黏土大树，一辆精致欧式复古小轿车缓慢平稳行驶，车身线条圆润优雅，车轮缓慢转动，微风带动黏土落叶轻轻飘飞，阳光穿透树叶形成柔光光斑，镜头从林间全景慢慢拉近至车身侧身特写，低饱和莫兰迪配色，氛围静谧唯美，行驶动态舒缓柔和，黏土质感细腻高级",
+      "last_frame": [
+        "206",
+        0
+      ],
+      "first_frame": [
+        "139",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ImageToVideo"
+  },
+  "132": {
+    "_meta": {
+      "title": "ComfyMathExpression"
+    },
+    "inputs": {
+      "values.a": [
+        "200",
+        0
+      ],
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17"
+    },
+    "class_type": "ComfyMathExpression"
+  },
+  "136": {
+    "_meta": {
+      "title": "EasyCache"
+    },
+    "inputs": {
+      "model": [
+        "127",
+        0
+      ],
+      "verbose": false,
+      "end_percent": 0.9000000000000001,
+      "start_percent": 0.15,
+      "reuse_threshold": 0.20000000000000004
+    },
+    "class_type": "EasyCache"
+  },
+  "139": {
+    "_meta": {
+      "title": "LoadImage"
+    },
+    "inputs": {
+      "image": "None"
+    },
+    "class_type": "LoadImage"
+  },
+  "200": {
+    "_meta": {
+      "title": "DF_Int_to_Float（本机等价）"
+    },
+    "inputs": {
+      "value": 15
+    },
+    "class_type": "PrimitiveFloat"
+  },
+  "206": {
+    "_meta": {
+      "title": "LoadImage"
+    },
+    "inputs": {
+      "image": "None"
+    },
+    "class_type": "LoadImage"
+  }
+}

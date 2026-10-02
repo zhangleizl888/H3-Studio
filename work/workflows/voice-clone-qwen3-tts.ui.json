@@ -1,0 +1,1593 @@
+{
+  "id": "0139d433-d1e0-4766-bdd8-59b45302e3e3",
+  "extra": {
+    "ds": {
+      "scale": 0.7972024500000006,
+      "offset": [
+        -1603.6340436348942,
+        -404.28523590272476
+      ]
+    },
+    "ue_links": [],
+    "0246.VERSION": [
+      0,
+      0,
+      4
+    ],
+    "pixaromaGroups": [],
+    "frontendVersion": "1.23.0",
+    "VHS_MetadataImage": true,
+    "VHS_latentpreview": false,
+    "links_added_by_ue": [],
+    "VHS_KeepIntermediate": true,
+    "KKvideo_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "KKvideo_latentpreviewrate": 0
+  },
+  "links": [
+    [
+      12,
+      14,
+      0,
+      12,
+      1,
+      "STRING"
+    ],
+    [
+      32,
+      13,
+      0,
+      37,
+      0,
+      "AUDIO"
+    ],
+    [
+      33,
+      37,
+      0,
+      12,
+      0,
+      "AUDIO"
+    ],
+    [
+      38,
+      12,
+      0,
+      39,
+      0,
+      "AUDIO"
+    ],
+    [
+      39,
+      40,
+      0,
+      41,
+      0,
+      "AUDIO"
+    ],
+    [
+      40,
+      41,
+      0,
+      43,
+      0,
+      "AUDIO"
+    ],
+    [
+      41,
+      42,
+      0,
+      43,
+      3,
+      "STRING"
+    ],
+    [
+      42,
+      44,
+      0,
+      43,
+      8,
+      "STRING"
+    ],
+    [
+      43,
+      41,
+      0,
+      44,
+      0,
+      "AUDIO"
+    ],
+    [
+      46,
+      50,
+      0,
+      49,
+      0,
+      "AUDIO"
+    ],
+    [
+      47,
+      12,
+      0,
+      51,
+      0,
+      "AUDIO"
+    ],
+    [
+      48,
+      49,
+      0,
+      12,
+      3,
+      "AUDIO"
+    ],
+    [
+      49,
+      43,
+      0,
+      53,
+      0,
+      "AUDIO"
+    ],
+    [
+      50,
+      43,
+      0,
+      52,
+      0,
+      "AUDIO"
+    ]
+  ],
+  "nodes": [
+    {
+      "id": 37,
+      "pos": [
+        2761.060791015625,
+        131.8178253173828
+      ],
+      "mode": 4,
+      "size": [
+        308.3802795410156,
+        137.99423217773438
+      ],
+      "type": "AudioCrop",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 6,
+      "inputs": [
+        {
+          "link": 32,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "start_time",
+          "type": "STRING",
+          "label": "start_time",
+          "widget": {
+            "name": "start_time"
+          }
+        },
+        {
+          "name": "end_time",
+          "type": "STRING",
+          "label": "end_time",
+          "widget": {
+            "name": "end_time"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "label": "AUDIO",
+          "links": [
+            33
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AudioCrop",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "0:00",
+        "0:12"
+      ]
+    },
+    {
+      "id": 13,
+      "pos": [
+        2402.103759765625,
+        131.50698852539062
+      ],
+      "mode": 4,
+      "size": [
+        327.9394836425781,
+        138.44927978515625
+      ],
+      "type": "LoadAudio",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "COMBO",
+          "label": "audio",
+          "widget": {
+            "name": "audio"
+          }
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "AUDIOUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "label": "AUDIO",
+          "links": [
+            32
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "194e4fe37050d34777d747ab762cfc83543464f0017ed2212690c862f7d518af.mp3",
+        null,
+        null
+      ]
+    },
+    {
+      "id": 50,
+      "pos": [
+        2402.707275390625,
+        632.3839721679688
+      ],
+      "mode": 4,
+      "size": [
+        327.9394836425781,
+        138.44927978515625
+      ],
+      "type": "LoadAudio",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 1,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "COMBO",
+          "label": "audio",
+          "widget": {
+            "name": "audio"
+          }
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "AUDIOUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "label": "AUDIO",
+          "links": [
+            46
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "194e4fe37050d34777d747ab762cfc83543464f0017ed2212690c862f7d518af.mp3",
+        null,
+        null
+      ]
+    },
+    {
+      "id": 49,
+      "pos": [
+        2761.664306640625,
+        632.69482421875
+      ],
+      "mode": 4,
+      "size": [
+        308.197998046875,
+        136.90036010742188
+      ],
+      "type": "AudioCrop",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 7,
+      "inputs": [
+        {
+          "link": 46,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "start_time",
+          "type": "STRING",
+          "label": "start_time",
+          "widget": {
+            "name": "start_time"
+          }
+        },
+        {
+          "name": "end_time",
+          "type": "STRING",
+          "label": "end_time",
+          "widget": {
+            "name": "end_time"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "label": "AUDIO",
+          "links": [
+            48
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AudioCrop",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "0:00",
+        "0:12"
+      ]
+    },
+    {
+      "id": 14,
+      "pos": [
+        2401.969970703125,
+        361.00640869140625
+      ],
+      "mode": 4,
+      "size": [
+        668.0338745117188,
+        178.49363708496094
+      ],
+      "type": "PrimitiveStringMultiline",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 2,
+      "inputs": [
+        {
+          "name": "value",
+          "type": "STRING",
+          "label": "value",
+          "widget": {
+            "name": "value"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "label": "STRING",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PrimitiveStringMultiline",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "鱼和熊掌不可兼得！但是解渴呀！"
+      ]
+    },
+    {
+      "id": 39,
+      "pos": [
+        3560.3095703125,
+        461.3561096191406
+      ],
+      "mode": 4,
+      "size": [
+        297.97802734375,
+        138.71859741210938
+      ],
+      "type": "SaveAudioMP3",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 11,
+      "inputs": [
+        {
+          "link": 38,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "label": "filename_prefix",
+          "widget": {
+            "name": "filename_prefix"
+          }
+        },
+        {
+          "name": "quality",
+          "type": "COMBO",
+          "label": "quality",
+          "widget": {
+            "name": "quality"
+          }
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SaveAudioMP3",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "xiao1",
+        "128k"
+      ]
+    },
+    {
+      "id": 51,
+      "pos": [
+        3560.423583984375,
+        311.4017028808594
+      ],
+      "mode": 4,
+      "size": [
+        297.7227478027344,
+        88.91156768798828
+      ],
+      "type": "PreviewAudio",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 12,
+      "inputs": [
+        {
+          "link": 47,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAudio",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 52,
+      "pos": [
+        3560.485107421875,
+        1271.5302734375
+      ],
+      "mode": 0,
+      "size": [
+        297.97802734375,
+        138.71859741210938
+      ],
+      "type": "SaveAudioMP3",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 15,
+      "inputs": [
+        {
+          "link": 50,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "label": "filename_prefix",
+          "widget": {
+            "name": "filename_prefix"
+          }
+        },
+        {
+          "name": "quality",
+          "type": "COMBO",
+          "label": "quality",
+          "widget": {
+            "name": "quality"
+          }
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SaveAudioMP3",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "xiao1",
+        "128k"
+      ]
+    },
+    {
+      "id": 53,
+      "pos": [
+        3560.599365234375,
+        1121.575927734375
+      ],
+      "mode": 0,
+      "size": [
+        297.7227478027344,
+        88.91156768798828
+      ],
+      "type": "PreviewAudio",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 14,
+      "inputs": [
+        {
+          "link": 49,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAudio",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 41,
+      "pos": [
+        2760.59130859375,
+        971.3862915039062
+      ],
+      "mode": 0,
+      "size": [
+        308.8392333984375,
+        138.94171142578125
+      ],
+      "type": "AudioCrop",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 8,
+      "inputs": [
+        {
+          "link": 39,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "start_time",
+          "type": "STRING",
+          "label": "start_time",
+          "widget": {
+            "name": "start_time"
+          }
+        },
+        {
+          "name": "end_time",
+          "type": "STRING",
+          "label": "end_time",
+          "widget": {
+            "name": "end_time"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "label": "AUDIO",
+          "links": [
+            40,
+            43
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AudioCrop",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "0:00",
+        "0:10"
+      ]
+    },
+    {
+      "id": 44,
+      "pos": [
+        2760.605712890625,
+        1211.690673828125
+      ],
+      "mode": 0,
+      "size": [
+        309.0589294433594,
+        348.24310302734375
+      ],
+      "type": "Apply Whisper",
+      "flags": {
+        "pinned": true,
+        "disabled": false,
+        "collapsed": false
+      },
+      "order": 10,
+      "title": "获取音频的文本内容",
+      "inputs": [
+        {
+          "link": 43,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "name": "model",
+          "type": "COMBO",
+          "label": "model",
+          "widget": {
+            "name": "model"
+          }
+        },
+        {
+          "name": "language",
+          "type": "COMBO",
+          "label": "language",
+          "shape": 7,
+          "widget": {
+            "name": "language"
+          }
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "label": "prompt",
+          "shape": 7,
+          "widget": {
+            "name": "prompt"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "label": "text",
+          "links": [
+            42
+          ]
+        },
+        {
+          "name": "segments_alignment",
+          "type": "whisper_alignment",
+          "label": "segments_alignment"
+        },
+        {
+          "name": "words_alignment",
+          "type": "whisper_alignment",
+          "label": "words_alignment"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Apply Whisper",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "whisper-large-v3",
+        "Chinese",
+        ""
+      ]
+    },
+    {
+      "id": 42,
+      "pos": [
+        2401.687744140625,
+        1211.2353515625
+      ],
+      "mode": 0,
+      "size": [
+        327.54229736328125,
+        348.94244384765625
+      ],
+      "type": "Text",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 3,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "label": "text",
+          "widget": {
+            "name": "text"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "string",
+          "type": "STRING",
+          "label": "string",
+          "links": [
+            41
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Text",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "鱼和熊掌不可兼得！但是解渴呀！"
+      ]
+    },
+    {
+      "id": 43,
+      "pos": [
+        3100.642333984375,
+        971.9566650390625
+      ],
+      "mode": 0,
+      "size": [
+        398.71844482421875,
+        588.069580078125
+      ],
+      "type": "FB_Qwen3TTSVoiceClone",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 13,
+      "inputs": [
+        {
+          "link": 40,
+          "name": "ref_audio",
+          "type": "AUDIO",
+          "label": "ref_audio",
+          "shape": 7
+        },
+        {
+          "name": "voice_clone_prompt",
+          "type": "VOICE_CLONE_PROMPT",
+          "label": "voice_clone_prompt",
+          "shape": 7
+        },
+        {
+          "name": "config",
+          "type": "TTS_CONFIG",
+          "label": "config",
+          "shape": 7
+        },
+        {
+          "link": 41,
+          "name": "target_text",
+          "type": "STRING",
+          "label": "target_text",
+          "widget": {
+            "name": "target_text"
+          }
+        },
+        {
+          "name": "model_choice",
+          "type": "COMBO",
+          "label": "model_choice",
+          "widget": {
+            "name": "model_choice"
+          }
+        },
+        {
+          "name": "device",
+          "type": "COMBO",
+          "label": "device",
+          "widget": {
+            "name": "device"
+          }
+        },
+        {
+          "name": "precision",
+          "type": "COMBO",
+          "label": "precision",
+          "widget": {
+            "name": "precision"
+          }
+        },
+        {
+          "name": "language",
+          "type": "COMBO",
+          "label": "language",
+          "widget": {
+            "name": "language"
+          }
+        },
+        {
+          "link": 42,
+          "name": "ref_text",
+          "type": "STRING",
+          "label": "ref_text",
+          "shape": 7,
+          "widget": {
+            "name": "ref_text"
+          }
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "label": "seed",
+          "shape": 7,
+          "widget": {
+            "name": "seed"
+          }
+        },
+        {
+          "name": "max_new_tokens",
+          "type": "INT",
+          "label": "max_new_tokens",
+          "shape": 7,
+          "widget": {
+            "name": "max_new_tokens"
+          }
+        },
+        {
+          "name": "top_p",
+          "type": "FLOAT",
+          "label": "top_p",
+          "shape": 7,
+          "widget": {
+            "name": "top_p"
+          }
+        },
+        {
+          "name": "top_k",
+          "type": "INT",
+          "label": "top_k",
+          "shape": 7,
+          "widget": {
+            "name": "top_k"
+          }
+        },
+        {
+          "name": "temperature",
+          "type": "FLOAT",
+          "label": "temperature",
+          "shape": 7,
+          "widget": {
+            "name": "temperature"
+          }
+        },
+        {
+          "name": "repetition_penalty",
+          "type": "FLOAT",
+          "label": "repetition_penalty",
+          "shape": 7,
+          "widget": {
+            "name": "repetition_penalty"
+          }
+        },
+        {
+          "name": "x_vector_only",
+          "type": "BOOLEAN",
+          "label": "x_vector_only",
+          "shape": 7,
+          "widget": {
+            "name": "x_vector_only"
+          }
+        },
+        {
+          "name": "attention",
+          "type": "COMBO",
+          "label": "attention",
+          "shape": 7,
+          "widget": {
+            "name": "attention"
+          }
+        },
+        {
+          "name": "unload_model_after_generate",
+          "type": "BOOLEAN",
+          "label": "unload_model_after_generate",
+          "shape": 7,
+          "widget": {
+            "name": "unload_model_after_generate"
+          }
+        },
+        {
+          "name": "custom_model_path",
+          "type": "STRING",
+          "label": "custom_model_path",
+          "shape": 7,
+          "widget": {
+            "name": "custom_model_path"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "links": [
+            49,
+            50
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FB_Qwen3TTSVoiceClone",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "Good one. Okay, fine, I'm just gonna leave this sock monkey here. Goodbye.",
+        "0.6B",
+        "auto",
+        "bf16",
+        "Auto",
+        "",
+        129226910394535,
+        "randomize",
+        2048,
+        0.8,
+        20,
+        1,
+        1.05,
+        false,
+        "auto",
+        false,
+        ""
+      ]
+    },
+    {
+      "id": 12,
+      "pos": [
+        3102.201171875,
+        131.91429138183594
+      ],
+      "mode": 4,
+      "size": [
+        397.6779479980469,
+        637.8726196289062
+      ],
+      "type": "IndexTTS2Run",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 9,
+      "inputs": [
+        {
+          "link": 33,
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio"
+        },
+        {
+          "link": 12,
+          "name": "text",
+          "type": "STRING",
+          "label": "text"
+        },
+        {
+          "name": "dialogue_audio_s2",
+          "type": "AUDIO",
+          "label": "dialogue_audio_s2",
+          "shape": 7
+        },
+        {
+          "link": 48,
+          "name": "emo_audio_prompt",
+          "type": "AUDIO",
+          "label": "emo_audio_prompt",
+          "shape": 7
+        },
+        {
+          "name": "emo_audio_prompt_s2",
+          "type": "AUDIO",
+          "label": "emo_audio_prompt_s2",
+          "shape": 7
+        },
+        {
+          "name": "top_k",
+          "type": "INT",
+          "label": "top_k",
+          "widget": {
+            "name": "top_k"
+          }
+        },
+        {
+          "name": "top_p",
+          "type": "FLOAT",
+          "label": "top_p",
+          "widget": {
+            "name": "top_p"
+          }
+        },
+        {
+          "name": "temperature",
+          "type": "FLOAT",
+          "label": "temperature",
+          "widget": {
+            "name": "temperature"
+          }
+        },
+        {
+          "name": "num_beams",
+          "type": "INT",
+          "label": "num_beams",
+          "widget": {
+            "name": "num_beams"
+          }
+        },
+        {
+          "name": "max_mel_tokens",
+          "type": "INT",
+          "label": "max_mel_tokens",
+          "widget": {
+            "name": "max_mel_tokens"
+          }
+        },
+        {
+          "name": "max_text_tokens_per_sentence",
+          "type": "INT",
+          "label": "max_text_tokens_per_sentence",
+          "widget": {
+            "name": "max_text_tokens_per_sentence"
+          }
+        },
+        {
+          "name": "custom_cuda_kernel",
+          "type": "BOOLEAN",
+          "label": "custom_cuda_kernel",
+          "widget": {
+            "name": "custom_cuda_kernel"
+          }
+        },
+        {
+          "name": "deepspeed",
+          "type": "BOOLEAN",
+          "label": "deepspeed",
+          "widget": {
+            "name": "deepspeed"
+          }
+        },
+        {
+          "name": "unload_model",
+          "type": "BOOLEAN",
+          "label": "unload_model",
+          "widget": {
+            "name": "unload_model"
+          }
+        },
+        {
+          "name": "emo_alpha",
+          "type": "FLOAT",
+          "label": "emo_alpha",
+          "shape": 7,
+          "widget": {
+            "name": "emo_alpha"
+          }
+        },
+        {
+          "name": "emo_vector",
+          "type": "STRING",
+          "label": "emo_vector",
+          "shape": 7,
+          "widget": {
+            "name": "emo_vector"
+          }
+        },
+        {
+          "name": "use_emo_text",
+          "type": "BOOLEAN",
+          "label": "use_emo_text",
+          "shape": 7,
+          "widget": {
+            "name": "use_emo_text"
+          }
+        },
+        {
+          "name": "emo_text",
+          "type": "STRING",
+          "label": "emo_text",
+          "shape": 7,
+          "widget": {
+            "name": "emo_text"
+          }
+        },
+        {
+          "name": "use_random",
+          "type": "BOOLEAN",
+          "label": "use_random",
+          "shape": 7,
+          "widget": {
+            "name": "use_random"
+          }
+        },
+        {
+          "name": "emo_alpha_s2",
+          "type": "FLOAT",
+          "label": "emo_alpha_s2",
+          "shape": 7,
+          "widget": {
+            "name": "emo_alpha_s2"
+          }
+        },
+        {
+          "name": "emo_vector_s2",
+          "type": "STRING",
+          "label": "emo_vector_s2",
+          "shape": 7,
+          "widget": {
+            "name": "emo_vector_s2"
+          }
+        },
+        {
+          "name": "use_emo_text_s2",
+          "type": "BOOLEAN",
+          "label": "use_emo_text_s2",
+          "shape": 7,
+          "widget": {
+            "name": "use_emo_text_s2"
+          }
+        },
+        {
+          "name": "emo_text_s2",
+          "type": "STRING",
+          "label": "emo_text_s2",
+          "shape": 7,
+          "widget": {
+            "name": "emo_text_s2"
+          }
+        },
+        {
+          "name": "use_random_s2",
+          "type": "BOOLEAN",
+          "label": "use_random_s2",
+          "shape": 7,
+          "widget": {
+            "name": "use_random_s2"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "label": "audio",
+          "links": [
+            38,
+            47
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "IndexTTS2Run",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        30,
+        0.8,
+        0.8,
+        3,
+        1500,
+        120,
+        false,
+        false,
+        true,
+        1,
+        "",
+        false,
+        "",
+        false,
+        1,
+        "",
+        false,
+        "",
+        false
+      ]
+    },
+    {
+      "id": 54,
+      "pos": [
+        2379.732666015625,
+        -137.88519287109375
+      ],
+      "mode": 0,
+      "size": [
+        487.1737365722656,
+        117.03451538085938
+      ],
+      "type": "忽略多组孤海",
+      "color": "#232",
+      "flags": {},
+      "order": 4,
+      "inputs": [],
+      "bgcolor": "#353",
+      "outputs": [],
+      "properties": {
+        "guhai_ig_mode": "always_one",
+        "guhai_ig_active": "方案二：Qwen3-TTS音频克隆",
+        "guhai_ig_filter": "方案",
+        "guhai_ig_disable": false,
+        "Node name for S&R": "忽略多组孤海",
+        "guhai_ig_ui_scale": 1,
+        "guhai_ig_active_set": [],
+        "guhai_ig_name_color": "#16d312",
+        "guhai_ig_sort_order": "position",
+        "guhai_ig_color_filter": "none",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 40,
+      "pos": [
+        2401.143310546875,
+        971.1668701171875
+      ],
+      "mode": 0,
+      "size": [
+        328.35498046875,
+        139.1772918701172
+      ],
+      "type": "LoadAudio",
+      "flags": {
+        "pinned": true,
+        "disabled": false
+      },
+      "order": 5,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "COMBO",
+          "label": "audio",
+          "widget": {
+            "name": "audio"
+          }
+        },
+        {
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "label": "audioUI",
+          "widget": {
+            "name": "audioUI"
+          }
+        },
+        {
+          "name": "upload",
+          "type": "AUDIOUPLOAD",
+          "label": "upload",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "label": "AUDIO",
+          "links": [
+            39
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "6afe8a320e0b54ad74fb7fc52d82d2de42b7be3b80ad5d0b1d6db427cd43ed8a.WAV",
+        null,
+        null
+      ]
+    }
+  ],
+  "config": {},
+  "groups": [
+    {
+      "id": 17,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "方案一：IndexTTS2-情感控制克隆",
+      "bounding": [
+        2381.969970703125,
+        14.306989669799805,
+        1496.317626953125,
+        776.5262451171875
+      ],
+      "font_size": 36
+    },
+    {
+      "id": 11,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "上传音频>音色参考",
+      "bounding": [
+        2392.103759765625,
+        57.90699005126953,
+        687.33740234375,
+        222.04928588867188
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 12,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "上传音频>情感参考",
+      "bounding": [
+        2392.707275390625,
+        558.7839965820312,
+        687.155029296875,
+        222.04928588867188
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 13,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "输入文本>要说的话",
+      "bounding": [
+        2391.969970703125,
+        287.4064025878906,
+        687.2343139648438,
+        261.3381042480469
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 14,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "克隆核心——IndexTTS2",
+      "bounding": [
+        3092.201171875,
+        58.314292907714844,
+        417.677978515625,
+        721.47265625
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 15,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "Group",
+      "bounding": [
+        3550.3095703125,
+        237.80169677734375,
+        317.97802734375,
+        372.27301025390625
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 23,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "方案二：Qwen3-TTS音频克隆",
+      "bounding": [
+        2381.143310546875,
+        853.9669189453125,
+        1497.31982421875,
+        726.2108154296875
+      ],
+      "font_size": 36
+    },
+    {
+      "id": 18,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "上传音频>音色参考",
+      "bounding": [
+        2391.143310546875,
+        897.56689453125,
+        688.287353515625,
+        222.77731323242188
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 19,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "输入文本>要说的话",
+      "bounding": [
+        2391.687744140625,
+        1137.6353759765625,
+        347.542236328125,
+        432.5423889160156
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 20,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "音频文本",
+      "bounding": [
+        2750.605712890625,
+        1138.0906982421875,
+        329.058837890625,
+        431.8431701660156
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 21,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "克隆核心——Qwen3-TTS",
+      "bounding": [
+        3090.642333984375,
+        898.356689453125,
+        418.718505859375,
+        671.6695556640625
+      ],
+      "font_size": 24
+    },
+    {
+      "id": 22,
+      "color": "#3f789e",
+      "flags": {
+        "pinned": true
+      },
+      "title": "Group",
+      "bounding": [
+        3550.485107421875,
+        1047.9759521484375,
+        317.97802734375,
+        372.2729797363281
+      ],
+      "font_size": 24
+    }
+  ],
+  "version": 0.4,
+  "revision": 0,
+  "last_link_id": 50,
+  "last_node_id": 54
+}
