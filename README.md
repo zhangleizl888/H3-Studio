@@ -96,7 +96,6 @@ H3/
 │       ├── alembic/         # 9 migrations, starting from 9 tables
 │       └── scripts/         # pg.py (embedded PG), check_* (offline acceptance), e2e_*, smoke_*
 ├── work/                    # Workflow bundle: 7 graphs + manifest + import/export scripts (work/README.md)
-├── docs/                    # AGENT-ACCESS.zh.md / LOCAL-LLM-TECH-REPORT.md / FULL-AUDIT-*.zh.md
 ├── PLAN.md                  # Full design and contract document (§10 is the REST contract)
 ├── pnpm-workspace.yaml
 └── LICENSE                  # Apache-2.0
@@ -356,7 +355,6 @@ Local agents do not need any exposure: the stdio command line in the MCP config 
 `~/.h3/config.json` itself, so no token lands in the client's config file. The tool surface has 73 tools
 covering status / workflow_select / job_plan / job_submit / job_wait / media_* / script_* / export_* and
 friends; a typical round is `status → workflow_select → job_plan → job_submit → job_get → media_location`.
-Details in [`docs/AGENT-ACCESS.zh.md`](docs/AGENT-ACCESS.zh.md) (Chinese).
 
 ---
 
@@ -400,7 +398,7 @@ cd apps/api
 .venv/Scripts/python.exe scripts/run_job.py --kind image --slots '{"prompt":"…"}'   # slots are named by signal
 ```
 
-Non-negotiables when changing code (rationale in `docs/FULL-AUDIT-2026-10-02.zh.md`): weight names are
+Non-negotiables when changing code: weight names are
 never approximated, auto-selection must compact input slots after pruning, retries cannot reuse a stale
 graph, changing a default also touches `graph_original`, artifacts are only `type=output`, and a new page
 must register with the reconciliation pass.
@@ -432,9 +430,6 @@ must register with the reconciliation pass.
 |---|---|
 | `PLAN.md` | Full design and interface contract (§10 is the REST contract) |
 | `work/README.md` | Workflow bundle: 7 graphs, weight and node requirements, import and verification |
-| `docs/AGENT-ACCESS.zh.md` | MCP / CLI access and exposure policy (Chinese) |
-| `docs/LOCAL-LLM-TECH-REPORT.md` | Local text-model selection and benchmarks (Chinese version alongside) |
-| `docs/FULL-AUDIT-2026-10-02.zh.md` | Full audit record incl. code-level invariants (Chinese) |
 
 ## 12. License
 

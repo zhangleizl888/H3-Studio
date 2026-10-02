@@ -90,7 +90,6 @@ H3/
 │       ├── alembic/       # 9 个迁移，初始 9 表 → 工作流绑定/技能/版本历史/app_settings
 │       └── scripts/       # pg.py（内嵌 PG 启停）、check_*（离线验收）、e2e_*（真机）、smoke_*
 ├── work/                  # 工作流包：7 张图 + manifest + 导入器/导出器，见 work/README.zh.md
-├── docs/                  # AGENT-ACCESS.zh.md / LOCAL-LLM-TECH-REPORT.zh.md / FULL-AUDIT-*.zh.md
 ├── PLAN.md                # 设计与契约全文（§10 是接口契约）
 ├── pnpm-workspace.yaml
 └── LICENSE                # Apache-2.0
@@ -335,7 +334,6 @@ h3 expose off                      # 收回
 本机智能体走 stdio 就够了，配置里那条命令行自己读 `~/.h3/config.json`，token 不会落进客户端配置文件。
 工具面共 73 个，覆盖 status / workflow_select / job_plan / job_submit / job_wait / media_* / script_* /
 export_* 等；一轮典型流程是 `status → workflow_select → job_plan → job_submit → job_get → media_location`。
-细节见 [`docs/AGENT-ACCESS.zh.md`](docs/AGENT-ACCESS.zh.md)。
 
 ---
 
@@ -379,7 +377,7 @@ cd apps/api
 .venv/Scripts/python.exe scripts/run_job.py --kind image --slots '{"prompt":"…"}'   # 槽位按信号名写
 ```
 
-改代码时的几条硬约束（细节与依据见 `docs/FULL-AUDIT-2026-10-02.zh.md`）：工作流图的权重名不做就近匹配、
+改代码时的几条硬约束：工作流图的权重名不做就近匹配、
 自动选会剪输入位必须压实、重试不能复用旧图、改默认值要同步 `graph_original`、产物只认 `type=output`、
 停 ComfyUI 前先看队列。
 
@@ -410,9 +408,6 @@ cd apps/api
 |---|---|
 | `PLAN.md` | 设计与接口契约全文（§10 是 REST 契约） |
 | `work/README.zh.md` | 工作流包：7 张图、权重与节点要求、导入与校验 |
-| `docs/AGENT-ACCESS.zh.md` | MCP / CLI 接入与暴露策略 |
-| `docs/LOCAL-LLM-TECH-REPORT.zh.md` | 本地文本模型的选型与实测 |
-| `docs/FULL-AUDIT-2026-10-02.zh.md` | 全量体检记录（含代码级不变量） |
 
 ## 12. 许可
 
