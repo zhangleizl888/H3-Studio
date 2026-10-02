@@ -1,0 +1,20 @@
+{
+  "name": "h3-studio-desktop",
+  "productName": "H3 Studio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "H3 Studio 桌面壳：拉起本地后端并显示工作台界面",
+  "author": "H3 Studio",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win",
+    "dist:win:dir": "electron-builder --win dir",
+    "dist:mac": "electron-builder --mac --arm64",
+    "dist:all": "electron-builder --mac --win --arm64 --x64"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  }
+}

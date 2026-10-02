@@ -7,7 +7,6 @@ import {
   Moon,
   Layers,
   Plus,
-  ScrollText,
   Settings2,
   Film,
   Sparkles,
@@ -41,7 +40,7 @@ const STAGES = [
 
 export function AppShell() {
   const { id } = useParams();
-  const { pathname, search } = useLocation();
+  const { pathname } = useLocation();
   const { data: projects } = useProjects();
   const { navCollapsed, setNavCollapsed, theme, toggleTheme, user, setUser } = useApp();
   const [modelConfig, setModelConfig] = useState(false);
@@ -88,13 +87,6 @@ export function AppShell() {
             ))}
           {project && !navCollapsed && <div className="my-1 border-t border-hairline" />}
           <SideLink to="/" label="仪表盘" icon={Film} collapsed={navCollapsed} active={pathname === "/"} />
-          <SideLink
-            to="/settings/gen?tab=workflows"
-            label="工作流库"
-            icon={ScrollText}
-            collapsed={navCollapsed}
-            active={pathname.startsWith("/settings") && search.includes("tab=workflows")}
-          />
           <SideLink to="/skills" label="技能库" icon={Sparkles} collapsed={navCollapsed} />
           <SideLink to="/history" label="生成历史" icon={History} collapsed={navCollapsed} active={pathname.startsWith("/history")} />
           <SideLink to="/trash" label="生成回收站" icon={Trash2} collapsed={navCollapsed} active={pathname.startsWith("/trash")} />
@@ -103,7 +95,7 @@ export function AppShell() {
             label="设置"
             icon={Settings2}
             collapsed={navCollapsed}
-            active={pathname.startsWith("/settings") && !search.includes("tab=workflows")}
+            active={pathname.startsWith("/settings")}
           />
           <button
             onClick={() => setModelConfig(true)}

@@ -1,0 +1,68 @@
+appId: com.h3studio.desktop
+productName: H3 Studio
+copyright: MIT License · H3 Studio
+
+directories:
+  output: ../../dist/desktop
+  buildResources: build
+
+# 界面由后端自己托管（app/main.py 的 mount_web_client），所以壳里不塞前端资源：
+# 只带 main.cjs 和托盘/窗口用的图标，避免同一份 dist 在包里存两处、改版本时各改一半。
+files:
+  - main.cjs
+  - package.json
+  - build/icon.ico
+  - build/icon.png
+
+asar: true
+npmRebuild: false
+publish: null
+
+extraResources:
+  # PyInstaller onedir 产物整个搬进去：壳找的是 resources/backend/h3-backend(.exe)。
+  # 不能放 asar 里 —— 压缩包内的 exe 没法执行。
+  - from: ../api/dist/h3-backend
+    to: backend
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  # 装到当前用户（%LOCALAPPDATA%\Programs），不弹 UAC：这是本机工具，不是系统服务
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: H3 Studio
+  uninstallDisplayName: H3 Studio
+  # 卸载绝不动数据：媒体产物、内嵌数据库、密钥都在 %LOCALAPPDATA%\H3 Studio，
+  # 重装时用户期望接着上次的库走；要清干净请手动删那个目录（README 里写了）
+  deleteAppDataOnUninstall: false
+  artifactName: H3Studio-Setup-${version}.${ext}
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  category: public.app-category.photo-video
+  # 1024 的 icon.png 由 electron-builder 自己生成 .icns（make-icon.ps1 只产 png/ico，
+  # iconutil 是 mac 工具链的东西，不能在 Windows 上顺手做掉）
+  icon: build/icon.png
+  minimumSystemVersion: "11.0"
+  # 未签名交付：identity 显式置空，否则 electron-builder 会去找钥匙串里的 Developer ID 并失败。
+  # 拿到 Apple Developer 账号后改成 identity: "Developer ID Application: ..." 并把 notarize 打开。
+  identity: null
+  artifactName: H3Studio-${version}-arm64.${ext}
+
+dmg:
+  artifactName: H3Studio-${version}-arm64.${ext}
