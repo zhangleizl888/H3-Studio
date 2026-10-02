@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ShieldCheck, UserRoundPlus, UsersRound } from "lucide-react";
 import { Badge, Button, Empty, Field, Input, Modal, Panel, Select } from "../../components/ui";
 import { useUserMutations, useUsers } from "../../lib/hooks";
+import { MIN_PASSWORD_LEN, passwordProblems } from "../../lib/password";
 import type { Role, User } from "../../lib/types";
 import { cn, fmtMoney, fmtTime, ago } from "../../lib/utils";
 import { useApp } from "../../state/app";
@@ -15,20 +16,11 @@ const ROLE_RULE: Record<Role, string> = {
   viewer: "只读",
 };
 
-const COMMON_WEAK = ["password", "passw0rd", "admin123", "123456", "111111", "000000", "qwerty", "h3studio"];
+const COMMON_WEAK_HINT = "password / 1234567890 / admin123 / h3studio1 / comfyui123 / iloveyou1 / 1234";
 
-/** 弱口令判定与后端首启规则用同一套：不达标就不给建号 */
-function pwProblems(pw: string, username: string): string[] {
-  if (!pw) return ["还没填密码"];
-  const out: string[] = [];
-  const low = pw.toLowerCase();
-  if (pw.length < 10) out.push(`至少 10 位，现在 ${pw.length} 位`);
-  if (/^\d+$/.test(pw)) out.push("不能是纯数字");
-  if (/^(.)\1+$/.test(pw)) out.push("不能是同一个字符一直重复");
-  if (COMMON_WEAK.some((w) => low.includes(w))) out.push("命中常见弱口令表");
-  if (username.trim() && low.includes(username.trim().toLowerCase())) out.push("不能包含用户名");
-  if (pw !== pw.trim()) out.push("开头或结尾有空格");
-  return out;
+/** 判定口径直接借 lib/password（与后端 security.py 一条规则），这里只补一句「还没填」 */
+function pwProblems(pw: string): string[] {
+  return pw ? passwordProblems(pw) : ["还没填密码"];
 }
 
 export default function Users() {
@@ -80,8 +72,9 @@ export default function Users() {
           ))}
         </ul>
         <p className="mt-2 text-caption leading-snug text-ink-mute">
-          首次启动时必须先建一个 admin 才进得来设置页，同一个密码规则在那一步就会生效：弱口令直接拒绝，不给建号。
-          这里建号也照同一条规则拦。
+          首次启动时必须先建一个 admin 才进得来设置页，同一条口令规则在那一步就会生效：不足 {MIN_PASSWORD_LEN} 位、
+          或命中常见弱口令表（{COMMON_WEAK_HINT}），不给建号。这里建号也照同一条规则拦。
+          门槛只有这么低是本机创作工具的定位 —— 要给一个团队用时，请把口令换成你自己的。
         </p>
       </Panel>
 
@@ -113,7 +106,7 @@ export default function Users() {
           <div className="p-3">
             <Empty
               title="还没有任何用户"
-              hint="这台机器第一次打开时必须先建一个 admin，弱口令会被拒绝。"
+              hint="这台机器第一次打开时必须先建一个 admin，口令不足 4 位会被拒绝。"
               action={
                 <Button size="sm" variant="primary" onClick={() => setCreateOpen(true)}>
                   新建管理员
@@ -353,7 +346,7 @@ function CreateUserModal({
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
 
-  const problems = pwProblems(password, username);
+  const problems = pwProblems(password);
   const nameBad = username.trim() !== "" && !/^[a-z0-9._-]{2,32}$/.test(username.trim());
   const canSubmit = username.trim() !== "" && displayName.trim() !== "" && problems.length === 0 && !nameBad;
 
@@ -419,7 +412,7 @@ function CreateUserModal({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="mono flex-1"
-              placeholder="至少 10 位，别用口令表里的"
+              placeholder={`至少 ${MIN_PASSWORD_LEN} 位，别用口令表里的`}
               autoComplete="new-password"
             />
             <Button size="sm" variant="quiet" onClick={() => setShowPw((v) => !v)}>
@@ -440,16 +433,18 @@ function CreateUserModal({
           )}
         >
           {password === "" ? (
-            <span>密码不足 10 位、纯数字、连续重复、命中常见弱口令表或包含用户名，都会被拒绝。</span>
+            <span>
+              口令不足 {MIN_PASSWORD_LEN} 位、命中常见弱口令表（{COMMON_WEAK_HINT}）、开头结尾带空格，都会被拒绝。
+            </span>
           ) : problems.length > 0 ? (
             <ul className="space-y-0.5">
-              <li className="font-medium">弱口令，不给建号：</li>
+              <li className="font-medium">口令不合规则，不给建号：</li>
               {problems.map((p) => (
                 <li key={p}>· {p}</li>
               ))}
             </ul>
           ) : (
-            <span>这条密码够用。首次启动建 admin 走的是同一套判定。</span>
+            <span>这条口令够用。首次启动建 admin、以及登录后自己「改密」，走的都是同一套判定。</span>
           )}
         </div>
 

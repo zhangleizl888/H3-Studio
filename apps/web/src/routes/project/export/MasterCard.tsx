@@ -29,7 +29,7 @@ export function MasterCard({
 }) {
   const complete = total > 0 && done === total;
   return (
-    <section className="glass rounded-sheet p-6 md:p-8">
+    <section className="glass rounded-panel p-6 md:p-8">
       <div className="flex flex-col justify-between gap-6 md:flex-row md:items-start">
         <div className="min-w-0 space-y-4">
           <div className="flex flex-wrap items-center gap-3">

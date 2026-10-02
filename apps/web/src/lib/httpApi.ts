@@ -1,14 +1,18 @@
 import type { Api, ExportFile, GenerateRequest, JobPlanResult, MediaTrashResult, ScriptTrashResult } from "./api";
 import type {
   GenInstance,
+  ImportReport,
   Job,
   LlmBackend,
   LlmRunResult,
   Media,
   ParsedScript,
   ScriptVersionRow,
+  Skill,
+  SkillImportReport,
   TrashItem,
   User,
+  Workflow,
   WorkflowModelOptions,
 } from "./types";
 import * as local from "./localStores";
@@ -139,6 +143,8 @@ function jobBody(r: GenerateRequest) {
     models: r.models,
     priority: r.priority ?? 100,
     meta: r.meta,
+    // 技能只交 id：正文由后端读库并进 slots.prompt，参数表看到的就是并好之后那串
+    skillIds: r.skillIds,
   };
 }
 
@@ -187,10 +193,18 @@ async function trashMediaRow(id: string): Promise<MediaTrashResult | null> {
 /**
  * 后端把文本模型能力放在 `caps`，前端类型是 `capabilities`。
  * 在这里归一次，而不是让每个页面各自兜底 —— ConfigPanel 就是直接读 capabilities.models 崩掉的。
+ * 另外两处键名漂移也在这里收：后端报 `ctxTotal`（前端读 `ctxSize`），
+ * 而 `supportsPull` 后端根本不发（只有 Ollama 有 /api/pull，llama.cpp 没有 → 按 kind 推）。
  */
 function toLlm(raw: Record<string, unknown>): LlmBackend {
   const caps = (raw.caps ?? raw.capabilities ?? {}) as Record<string, unknown>;
-  return { ...(raw as unknown as LlmBackend), capabilities: { models: [], ...caps } as unknown as LlmBackend["capabilities"] };
+  const capabilities = {
+    models: [],
+    ...caps,
+    ctxSize: caps.ctxSize ?? caps.ctxTotal ?? null,
+    supportsPull: caps.supportsPull ?? caps.kind === "ollama",
+  } as unknown as LlmBackend["capabilities"];
+  return { ...(raw as unknown as LlmBackend), capabilities };
 }
 
 /** 导出产物回填进本地媒体索引：不然资产库与「最近产物」看不到刚合成的成片 */
@@ -255,6 +269,11 @@ export const httpApi: Api = {
         clearTokens();
       }
     },
+    async changePassword(current, next) {
+      await req("/api/auth/change-password", { method: "POST", body: j({ currentPassword: current, newPassword: next }) });
+      // 服务端已经把该账号的会话全部吊销，本地这两张票留着只是一用就 401，直接丢掉
+      clearTokens();
+    },
     setupRequired: () => req<{ needed: boolean }>("/api/auth/setup-required").then((r) => r.needed),
   },
   instances: {
@@ -263,6 +282,7 @@ export const httpApi: Api = {
     update: (id, body) => req(`/api/instances/${id}`, { method: "PATCH", body: j(body) }),
     remove: (id) => req(`/api/instances/${id}`, { method: "DELETE" }),
     probe: (id) => req(`/api/instances/${id}/probe`, { method: "POST" }),
+    ping: (id) => req(`/api/instances/${id}/ping`, { method: "POST" }),
     dryProbe: (body) => req("/api/instances/dry-probe", { method: "POST", body: j(body) }),
   },
   llm: {
@@ -290,12 +310,20 @@ export const httpApi: Api = {
   workflows: {
     list: () => req("/api/workflows"),
     get: (id) => req(`/api/workflows/${id}`),
-    async importJson(name, json) {
+    async importJson(body) {
+      // 走 postForm：它带 Bearer、401 换票重试一次。以前这里是裸 fetch，
+      // 只写了 credentials:"include"，而这站的票在 localStorage 的 Bearer 头里 —— 导入必 401。
       const fd = new FormData();
-      fd.append("file", new Blob([json], { type: "application/json" }), name);
-      const res = await fetch(`${BASE}/api/workflows/import`, { method: "POST", body: fd, credentials: "include" });
-      if (!res.ok) throw new HttpError(res.status, await res.text());
-      return res.json();
+      fd.append("file", new Blob([body.json], { type: "application/json" }), `${body.name || "workflow"}.json`);
+      // 画布版是可选的第二份：给了就存进 ui_graph，编辑器与回导 ComfyUI 用那一份
+      if (body.uiJson) fd.append("ui_file", new Blob([body.uiJson], { type: "application/json" }), `${body.name || "workflow"}.ui.json`);
+      // 这些是后端的 Form 字段：不传就全退回默认值（名字变文件名、导入不做实例比对）
+      fd.append("name", body.name);
+      if (body.description) fd.append("description", body.description);
+      if (body.instanceId) fd.append("instance_id", body.instanceId);
+      if (body.priority != null) fd.append("priority", String(body.priority));
+      if (body.tags?.length) fd.append("tags", body.tags.join(","));
+      return postForm<{ workflow: Workflow; report: ImportReport }>("/api/workflows/import", fd);
     },
     validate: (graph, instanceId) => req("/api/workflows/validate", { method: "POST", body: j({ graph, instance_id: instanceId }) }),
     /** 装了节点包 / 换了实例之后重算一次：从原始导出重改写，不累积上一次的改动 */
@@ -311,7 +339,14 @@ export const httpApi: Api = {
         instanceId ? `&instance_id=${encodeURIComponent(instanceId)}` : ""
       }`),
     remove: (id) => req(`/api/workflows/${id}`, { method: "DELETE" }),
-    export: (id, format) => req(`/api/workflows/${id}/export?format=${format}`),
+    /**
+     * 后端回的是 {format, json}，而接口声明的是 Promise<string> —— 这里必须把字符串拆出来。
+     * 以前直接把整个对象当文本返回，导出页签的 <pre> 一渲染对象就把整页崩成白屏（React 200）。
+     */
+    export: async (id, format) => {
+      const r = await req<{ format: string; json: string }>(`/api/workflows/${encodeURIComponent(id)}/export?format=${format}`);
+      return typeof r === "string" ? r : r.json;
+    },
     slots: (id) => req(`/api/workflows/${id}/slots`),
     /** 这条工作流在那台实例上能换哪些权重。清单是实例报的，不是前端猜的 */
     modelOptions: (id, instanceId) =>
@@ -319,7 +354,56 @@ export const httpApi: Api = {
         `/api/workflows/${encodeURIComponent(id)}/models${instanceId ? `?instance_id=${encodeURIComponent(instanceId)}` : ""}`,
       ),
     nodeOverrides: (id, values) => req(`/api/workflows/${id}/node-overrides`, { method: "POST", body: j(values) }),
-    testRun: (id, instanceId) => req(`/api/workflows/${id}/test`, { method: "POST", body: j({ instanceId }) }),
+    testRun: (id, instanceId, slots) => req(`/api/workflows/${id}/test`, { method: "POST", body: j({ instanceId, slots: slots ?? {} }) }),
+    /** 这条工作流在每台实例上的默认权重。一次问齐，模型编辑与同步弹窗共用 */
+    bindings: (id) => req(`/api/workflows/${encodeURIComponent(id)}/bindings`),
+    saveBindings: (id, body) =>
+      req(`/api/workflows/${encodeURIComponent(id)}/bindings`, { method: "PUT", body: j({ instanceId: body.instanceId, overrides: body.overrides }) }),
+    clearBindings: (id, instanceId) => req(`/api/workflows/${encodeURIComponent(id)}/bindings/${encodeURIComponent(instanceId)}`, { method: "DELETE" }),
+    syncBindings: (id, body) =>
+      req(`/api/workflows/${encodeURIComponent(id)}/bindings/sync`, {
+        method: "POST",
+        body: j({
+          sourceInstanceId: body.sourceInstanceId,
+          targetInstanceIds: body.targetInstanceIds,
+          alignUnbound: body.alignUnbound ?? true,
+        }),
+      }),
+    syncAll: (body) =>
+      req("/api/workflows/sync-all", {
+        method: "POST",
+        body: j({
+          sourceInstanceId: body.sourceInstanceId,
+          targetInstanceIds: body.targetInstanceIds,
+          alignUnbound: body.alignUnbound ?? true,
+          onlyMissing: body.onlyMissing ?? false,
+          includeBuiltin: body.includeBuiltin ?? false,
+        }),
+      }),
+    check: (id, instanceIds) =>
+      req(`/api/workflows/${encodeURIComponent(id)}/check`, { method: "POST", body: j({ instanceIds: instanceIds ?? [] }) }),
+    replaceGraph: (id, body) =>
+      req(`/api/workflows/${encodeURIComponent(id)}/graph`, { method: "POST", body: j({ graph: body.graph, instance_id: body.instanceId }) }),
+  },
+  /**
+   * 技能库：真源在服务端。正文不在这里带过去 —— 前端只交选中的 id，
+   * 后端在 /llm/run 与 /jobs 各自读库拼好，所以改了技能不需要重存项目。
+   */
+  skills: {
+    async list(stage) {
+      return req<Skill[]>(`/api/skills${stage ? `?stage=${stage}` : ""}`);
+    },
+    create: (body) => req<Skill>("/api/skills", { method: "POST", body: j(body) }),
+    update: (id, body) => req<Skill>(`/api/skills/${encodeURIComponent(id)}`, { method: "PATCH", body: j(body) }),
+    remove: (id) => req<void>(`/api/skills/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    async importFiles(files, library) {
+      // 走 postForm：multipart 的 boundary 必须让浏览器自己生成，且要带 Bearer、401 换票重试一次
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f, f.name);
+      if (library) fd.append("library", library);
+      return postForm<SkillImportReport>("/api/skills/import", fd);
+    },
+    clear: () => req<{ deleted: number; names: string[] }>(`/api/skills/clear?confirm=${encodeURIComponent("清空技能库")}`, { method: "POST" }),
   },
   // A 方案：项目实体留在浏览器 IndexedDB，服务端不持有创作数据
   projects: {
@@ -524,6 +608,17 @@ export const httpApi: Api = {
   system: {
     storage: () => req("/api/system/storage"),
     gc: (dryRun) => req("/api/system/gc", { method: "POST", body: j({ dryRun }) }),
+    paths: () => req("/api/system/paths"),
+    backup: () => req("/api/system/backup"),
+    savePaths: (body) => req("/api/system/paths", { method: "PUT", body: j(body) }),
+    audit: (opts) => {
+      const q = new URLSearchParams();
+      if (opts?.limit) q.set("limit", String(opts.limit));
+      if (opts?.action) q.set("action", opts.action);
+      if (opts?.actor) q.set("actor", opts.actor);
+      const tail = q.toString();
+      return req(`/api/system/audit${tail ? `?${tail}` : ""}`);
+    },
     gpu: () => req("/api/system/gpu"),
     gpuYield: () => req("/api/system/gpu/yield", { method: "POST" }),
     gpuRestore: () => req("/api/system/gpu/restore", { method: "POST" }),

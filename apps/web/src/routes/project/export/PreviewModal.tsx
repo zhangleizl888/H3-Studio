@@ -98,7 +98,7 @@ export function PreviewModal({
               onClick={() => setIdx((i) => Math.max(0, i - 1))}
               disabled={idx === 0}
               aria-label="上一镜"
-              className="rounded-ctl border border-rule p-1.5 text-ink-dim hover:bg-raised disabled:opacity-40"
+              className="rounded-ctl border border-rule p-1.5 text-ink-dim hover:bg-raised disabled:opacity-45"
             >
               <SkipBack className="h-3.5 w-3.5" />
             </button>
@@ -107,7 +107,7 @@ export function PreviewModal({
               onClick={() => setIdx((i) => Math.min(entries.length - 1, i + 1))}
               disabled={idx >= entries.length - 1}
               aria-label="下一镜"
-              className="rounded-ctl border border-rule p-1.5 text-ink-dim hover:bg-raised disabled:opacity-40"
+              className="rounded-ctl border border-rule p-1.5 text-ink-dim hover:bg-raised disabled:opacity-45"
             >
               <SkipForward className="h-3.5 w-3.5" />
             </button>
@@ -123,7 +123,7 @@ export function PreviewModal({
         <p className="py-10 text-center text-note text-ink-mute">没有可预览的镜头。</p>
       ) : (
         <div className="space-y-3">
-          <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-panel border border-rule-soft bg-void">
+          <div className="relative flex aspect-video items-center justify-center overflow-hidden rounded-panel border border-rule-soft bg-scrim">
             {state === "loading" && (
               <span className="flex items-center gap-2 text-note text-ink-mute">
                 <Spinner className="h-4 w-4 text-chrome" /> 正在读取产物文件

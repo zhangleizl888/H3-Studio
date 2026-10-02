@@ -24,6 +24,8 @@ interface Props {
   aspectRatio: AspectRatio;
   llms: LlmBackend[] | undefined;
   shotBackendId: string | null | undefined;
+  /** 项目没显式选后端时，后端实际会用的那一台（llm_defaults → is_default）。界面要说「走默认」，不能说成「没有可用后端」 */
+  defaultLlmId?: string | null;
   shotModel: string | null | undefined;
   busy: string | null;
   error: string | null;
@@ -50,7 +52,8 @@ interface Props {
 export function ConfigPanel(p: Props) {
   const customDuration = !DURATION_OPTIONS.some((o) => o.value === p.targetDurationSec && o.value !== 0);
   const customStyle = !PRESET_KEYS.has(p.visualStyle);
-  const picked = p.llms?.find((b) => b.id === p.shotBackendId);
+  const viaDefault = !p.shotBackendId;
+  const picked = p.llms?.find((b) => b.id === p.shotBackendId) ?? (viaDefault ? p.llms?.find((b) => b.id === p.defaultLlmId) : undefined);
   const modelOptions = (p.llms ?? []).flatMap(modelChoices);
   /** 生成进行中锁住配置：中途改风格/时长，跑完的产物就和界面说的不是一回事了 */
   const lock = !!p.busy;
@@ -130,9 +133,9 @@ export function ConfigPanel(p: Props) {
           label="分镜生成模型"
           hint={
             picked
-              ? `ID: ${picked.id}${picked.capabilities.ctxSize ? ` · 实际上下文 ${picked.capabilities.ctxSize}` : " · 上下文未探到"}${
-                  picked.capabilities.ctxIsPerRequest ? "（可按请求调整）" : "（llama.cpp 的 -c 是启动参数，改它要重启服务）"
-                }`
+              ? `${viaDefault ? "未指定：走默认后端 · " : ""}ID: ${picked.id}${
+                  picked.capabilities.ctxSize ? ` · 实际上下文 ${picked.capabilities.ctxSize}` : " · 上下文未探到"
+                }${picked.capabilities.ctxIsPerRequest ? "（可按请求调整）" : "（llama.cpp 的 -c 是启动参数，改它要重启服务）"}`
               : "还没有可用的文本后端：去 设置 → AI 模型 加一个并探活"
           }
         >
@@ -242,7 +245,7 @@ export function ConfigPanel(p: Props) {
                 >
                   <span className="flex items-center gap-2">
                     <span className={cn("text-note font-semibold", active ? "text-ink" : "text-ink-dim")}>{m.name}</span>
-                    <span className="mono ml-auto shrink-0 text-micro text-ink-mute">{m.eta}</span>
+                    <span className="mono ml-auto shrink-0 text-caption text-ink-mute">{m.eta}</span>
                   </span>
                   <span className="mt-0.5 block text-caption leading-snug text-ink-mute">{m.when}</span>
                 </button>
@@ -258,12 +261,12 @@ export function ConfigPanel(p: Props) {
         </Field>
 
         <Field label="镜头衔接" hint="只作用于勾了「承接上一镜」的镜头所串成的续拍链">
-          <div className="rounded-ctl border border-rule-soft bg-white/[0.03] px-2 py-1.5">
+          <div className="rounded-ctl border border-rule-soft bg-sheen px-2 py-1.5">
             <Toggle checked={p.continuity} disabled={lock} onChange={p.onContinuity} label={<span className="text-caption">允许把相邻镜头串成一条续拍链</span>} />
           </div>
           {p.continuity && (
-            <div className="flex items-center gap-1.5">
-              <span className="mono text-[10px] text-ink-mute">段间重叠帧</span>
+            <div className="flex items-center gap-2">
+              <span className="mono text-caption text-ink-mute">段间重叠帧</span>
               {[5, 22, 39, 56].map((n) => {
                 const active = p.continuityOverlapFrames === n;
                 return (
@@ -275,7 +278,7 @@ export function ConfigPanel(p: Props) {
                     title={n <= 5 ? "接缝最短，最省时间" : n >= 56 ? "最顺但每段多出一大截重采样" : "默认档，顺与省之间的折中"}
                     onClick={() => p.onContinuityOverlap(n)}
                     className={cn(
-                      "h-6 min-w-[42px] rounded-ctl border px-1.5 text-[11px] transition-colors disabled:opacity-45",
+                      "h-6 min-w-[42px] rounded-ctl border px-1.5 text-caption transition-colors disabled:opacity-45",
                       active ? "border-transparent bg-ink text-slate" : "border-rule bg-raised text-ink-dim hover:text-ink",
                     )}
                   >
@@ -285,7 +288,7 @@ export function ConfigPanel(p: Props) {
               })}
             </div>
           )}
-          <p className="text-[10.5px] leading-snug text-ink-mute">
+          <p className="text-caption leading-snug text-ink-mute">
             关掉这张开关就逐镜单独出片：接缝只靠各自的首帧与「接上一镜」写下的文字锚点接续，不走 h3_chain 的 latent 回放。
           </p>
         </Field>
@@ -331,10 +334,11 @@ export function ConfigPanel(p: Props) {
 
 /** 一个后端能选哪个模型：Ollama 一台多模型，llama.cpp 通常就是挂着的那一个 */
 function modelChoices(b: LlmBackend): { value: string; label: string }[] {
+  // llama.cpp 的 /v1/models 把 model id 报成 gguf 的完整路径，界面上只留文件名
   const models = b.capabilities.models?.length ? b.capabilities.models : [""];
   return models.map((m) => ({
     value: `${b.id}::${m}`,
-    label: `${b.name}${m ? ` - ${m}` : " - 未探到模型清单"}${b.isDefault ? "（默认）" : ""} · ${b.scope === "local" ? "本机" : "云端"}`,
+    label: `${b.name}${m ? ` - ${m.replace(/\\/g, "/").split("/").pop()}` : " - 未探到模型清单"}${b.isDefault ? "（默认）" : ""} · ${b.scope === "local" ? "本机" : "云端"}`,
   }));
 }
 

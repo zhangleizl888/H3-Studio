@@ -64,16 +64,21 @@ export function isSignedIn(): boolean {
 }
 
 /**
+ * 演示账号的默认值 —— 登录页照它预填，所以它不能只在「自动登录开着」时存在：
+ * 装机包（桌面版）要显示登录页、又要把 admin / 12345 摆在脸上。
+ * 后端只有在监听环回且库里一个账号都没有时才会真的预置这个账号（见
+ * app/api/routes_auth.seed_loopback_admin），所以这里写死一个口令不等于开了后门。
+ */
+export const demoAccount = {
+  username: (import.meta.env.VITE_DEV_USER as string) || "admin",
+  password: (import.meta.env.VITE_DEV_PASS as string) || "12345",
+};
+
+/**
  * 演示/开发用的自动登录凭据。
  *
- * 后端只有在监听环回且库里一个账号都没有时才会预置 admin/1234（见
- * app/api/routes_auth.seed_loopback_admin），所以这份默认值不会替真部署打开后门；
- * 要给团队用时把 VITE_DEV_AUTOLOGIN=false 写进 .env，登录页就是唯一的门。
+ * 要给团队用时把 VITE_DEV_AUTOLOGIN=false 写进环境，登录页就是唯一的门；
+ * 改过自己的口令之后，要么把 VITE_DEV_PASS 跟着改成新口令，要么关掉自动登录。
  */
 export const devAutoLogin =
-  import.meta.env.VITE_DEV_AUTOLOGIN === "false"
-    ? null
-    : {
-        username: (import.meta.env.VITE_DEV_USER as string) || "admin",
-        password: (import.meta.env.VITE_DEV_PASS as string) || "1234",
-      };
+  import.meta.env.VITE_DEV_AUTOLOGIN === "false" ? null : demoAccount;

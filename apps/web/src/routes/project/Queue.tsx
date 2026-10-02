@@ -230,7 +230,11 @@ export default function Queue() {
                   const inst = instOf(j);
                   const isOpen = open.includes(j.id);
                   const isLive = j.state === "running" || j.state === "queued" || j.state === "dispatching";
-                  const stage = j.progress.stage ?? (j.progress.nodeTitle ? `节点 ${j.progress.nodeTitle}` : null);
+                  // 收口之后 progress.stage 是派发时留下的最后一句（老行到死都写「执行中」），
+                  // 终态一律按状态说话；死在哪儿看展开的日志，不在这一列猜。
+                  const stage = isLive
+                    ? j.progress.stage ?? (j.progress.nodeTitle ? `节点 ${j.progress.nodeTitle}` : null)
+                    : STATE_TEXT[j.state];
                   const elapsed = elapsedMs(j, now);
                   const prio = drafts[j.id] ?? String(j.priority);
                   return (
@@ -285,7 +289,7 @@ export default function Queue() {
                             stage={stage}
                           />
                           {j.progress.etaSec != null && !j.progress.unavailable && (
-                            <div className="mono text-micro text-ink-mute">还剩约 {fmtSec(j.progress.etaSec)}</div>
+                            <div className="mono text-caption text-ink-mute">还剩约 {fmtSec(j.progress.etaSec)}</div>
                           )}
                         </td>
                         {globalView && (
@@ -423,6 +427,34 @@ function JobDetail({ job, instance, interject }: { job: Job; instance: GenInstan
       </div>
 
       <div className="space-y-2">
+        {(!!job.modelNotes?.length || !!job.fillNotes?.length) && (
+          <div className="space-y-1 border-b border-rule-soft pb-2">
+            {!!job.modelNotes?.length && (
+              <div>
+                <div className="label mb-0.5">换上去的权重</div>
+                <ul className="space-y-0.5">
+                  {job.modelNotes.map((n) => (
+                    <li key={n} className="mono text-caption leading-snug text-ink-dim">
+                      {n}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!!job.fillNotes?.length && (
+              <div>
+                <div className="label mb-0.5">填图说明</div>
+                <ul className="space-y-0.5">
+                  {job.fillNotes.map((n) => (
+                    <li key={n} className="text-caption leading-snug text-ink-mute">
+                      {n}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
         <div className="label">日志</div>
         {job.log.length === 0 ? (
           <div className="text-note text-ink-mute">这条任务还没有留下日志。</div>

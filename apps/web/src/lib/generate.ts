@@ -7,7 +7,7 @@
 
 import type { GenerateRequest } from "./api";
 import { presetToRequest } from "./preset";
-import type { Character, Media, Project, RenderLog, Scene, Shot, Variation } from "./types";
+import type { Character, GenPreset, Media, Project, RenderLog, Scene, Shot, Variation } from "./types";
 import {
   H3_SIZES,
   IMAGE_SIZES,
@@ -82,6 +82,8 @@ export function characterRequest(project: Project, char: Character): GenerateReq
       seed: char.seed || undefined,
     },
     meta: { role: roleFor({ kind: "character", characterId: char.id }), refId: char.id },
+    // 技能只交 id：正文由后端读库并进上面那个 prompt 槽（参数表里看到的是并好之后那串）
+    skillIds: char.skillIds,
   };
 }
 
@@ -90,7 +92,7 @@ export function variationRequest(project: Project, char: Character, variation: V
   const { width, height } = imageSize(project);
   return {
     projectId: project.id,
-    ...presetToRequest(project, "image", variation.preset ?? char.preset),
+    ...presetToRequest(project, "image", char.preset),
     kind: "image",
     title: `变体 · ${char.name} / ${variation.name}`,
     slots: {
@@ -102,6 +104,8 @@ export function variationRequest(project: Project, char: Character, variation: V
       seed: char.seed || undefined,
     },
     meta: { role: "variation", refId: `${char.id}:${variation.id}` },
+    // 变体沿用它所属角色的技能选择：换了套衣服不该顺手改掉写法要求
+    skillIds: char.skillIds,
   };
 }
 
@@ -120,6 +124,35 @@ export function sceneRequest(project: Project, scene: Scene): GenerateRequest {
       height,
     },
     meta: { role: "scene", refId: scene.id },
+    skillIds: scene.skillIds,
+  };
+}
+
+/**
+ * 角色的音色样音。
+ *
+ * audio 这一类没有内置回落模板（后端 job_plan 里就没有），只能靠工作流库里那几条 ——
+ * 库里挑不出就如实失败，不会悄悄用出图的路径凑。
+ * 参考音频必须是真人语音且配上它真实说过的那句：条件缺一，模型会把十几个字拉成几分钟发声。
+ */
+export function voiceRequest(project: Project, char: Character): GenerateRequest {
+  const voice = char.voice;
+  const refs = serverMediaIds(voice?.refAudioIds);
+  const text = voice?.testText?.trim() || `我是${char.name}。`;
+  return {
+    projectId: project.id,
+    ...presetToRequest(project, "audio", voice?.preset),
+    kind: "audio",
+    title: `音色 · ${char.name}`,
+    slots: {
+      prompt: text,
+      ref_audios: refs,
+      ref_text: voice?.refText?.trim() || "",
+      language: voice?.language || "Auto",
+      seed: char.seed || undefined,
+      filename_prefix: `h3/voice-${char.name}`,
+    },
+    meta: { role: "voice", refId: char.id },
   };
 }
 
@@ -133,7 +166,7 @@ export function keyframeRequest(project: Project, shot: Shot, frameType: "start"
   const existing = shot.keyframes?.find((k) => k.type === frameType);
   return {
     projectId: project.id,
-    ...presetToRequest(project, "image", shot.imagePreset ?? scene?.preset),
+    ...presetToRequest(project, "image", scene?.preset),
     kind: "image",
     title: `${frameType === "start" ? "首帧" : "尾帧"} · 镜 ${shot.index}`,
     slots: {
@@ -188,7 +221,10 @@ function guideFrames(n: number | undefined): string {
 export function videoRequest(project: Project, shot: Shot): GenerateRequest {
   const [width, height] = videoSize(project);
   const turbo = project.config.resolutionMode === "preview";
-  const instanceId = shot.instanceId ?? project.config.videoInstanceId ?? undefined;
+  // 老存档的镜头只存了 instanceId，新的一律走 preset：两者取先有那个，别让改动把
+  // 「这一镜已经指定过实例」这件事抹平
+  const preset: GenPreset | undefined = shot.preset ?? (shot.instanceId ? { instanceId: shot.instanceId } : undefined);
+  const gen = presetToRequest(project, "video", preset);
 
   // 两个以上镜头相连 → 走 SequenceForge 的无缝续拍节点，一条链一个任务。
   // 存档目录按「项目 + 链头 + 链头起始帧」命名：同一链的后续镜头带同名目录进去，
@@ -199,8 +235,11 @@ export function videoRequest(project: Project, shot: Shot): GenerateRequest {
     const headStart = serverMediaIds([startFrameOf(head)])[0];
     return {
       projectId: project.id,
+      // 续拍固定走内置那条：多段无缝拼接只有 SequenceForge 那个节点做得了，
+      // 库里挑的工作流没有这个形状。实例与权重覆盖仍然照用户选的来。
       template: "h3_chain",
-      instanceId,
+      instanceId: gen.instanceId,
+      models: gen.models,
       kind: "video_chain",
       title: `长片续拍 · 镜 ${head.index}→${shot.index}（${chain.length} 段）`,
       slots: {
@@ -221,21 +260,27 @@ export function videoRequest(project: Project, shot: Shot): GenerateRequest {
         filename_prefix: `h3/链${shotLabel(head.id, head.index)}-${shotLabel(shot.id, shot.index)}`,
       },
       meta: { role: "video", refId: shot.id, promptMode: shot.h3Prompt.mode ?? project.config.h3PromptMode },
+      // 续拍链没有顶层 prompt：后端把技能并进链尾那一段（本镜头），前段已经在 latent 存档里跑过
+      skillIds: shot.skillIds,
     };
   }
 
   const refs = serverMediaIds([startFrameOf(shot)]);
   const refEnd = serverMediaIds([endFrameOf(shot)]);
+  const voiceRefs = serverMediaIds(
+    shot.characterIds.flatMap((cid) => project.data.characters.find((c) => c.id === cid)?.voice?.refAudioIds ?? []),
+  ).slice(0, 1);
   return {
     projectId: project.id,
-    ...presetToRequest(project, "video", shot.preset),
-    instanceId,
+    ...gen,
     kind: "video",
     title: `出片 · 镜 ${shot.index}`,
     slots: {
       prompt: videoPromptOf(shot),
       first_frame: refs[0],
       last_frame: refEnd[0],
+      // 角色配过音色就把参考音频递过去：能吃 ref_audios 的工作流才会被自动挑中（+2 分）
+      ...(voiceRefs.length ? { ref_audios: voiceRefs } : {}),
       width,
       height,
       seconds: Math.max(1, Math.round(shot.durationSec || 5)),
@@ -245,6 +290,7 @@ export function videoRequest(project: Project, shot: Shot): GenerateRequest {
       filename_prefix: `h3/镜${shotLabel(shot.id, shot.index)}`,
     },
     meta: { role: "video", refId: shot.id, promptMode: shot.h3Prompt.mode ?? project.config.h3PromptMode },
+    skillIds: shot.skillIds,
   };
 }
 
@@ -285,7 +331,15 @@ export function attachResult(project: Project, target: GenTarget, media: Media[]
     s.status = "completed";
     return true;
   }
-  if (target.kind === "voice") return false; // 音色产物挂在 char.voice 上，不落镜头与 refMediaIds
+  if (target.kind === "voice") {
+    const c = data.characters.find((x) => x.id === target.characterId);
+    if (!c) return false;
+    // 样本按时间倒序攒着：音色是「听一下决定要不要」的东西，覆盖掉上一次就等于让人重跑
+    c.voice ??= { refAudioIds: [], sampleMediaIds: [] };
+    c.voice.sampleMediaIds = [...ids, ...c.voice.sampleMediaIds.filter((x) => !ids.includes(x))];
+    c.voice.status = "completed";
+    return true;
+  }
   const shot = findShot(project, target.shotId);
   if (!shot) return false;
   if (target.kind === "keyframe") {

@@ -105,21 +105,21 @@ function TimelineBlock({
       onClick={() => playable && onPlay(videoId, `镜 ${cardLabel(shot)}`)}
       title={playable ? "点击播放这一段" : shot.action || "还没有画面"}
       style={{ width }}
-      className="group relative h-16 flex-none overflow-hidden border-y border-r border-white/10 bg-white/[0.045] text-left"
+      className="group relative h-16 flex-none overflow-hidden border-y border-r border-hairline bg-sheen text-left"
     >
       {src ? (
         <img src={src} alt="" className="h-full w-full object-cover opacity-80 transition-opacity group-hover:opacity-100" loading="lazy" />
       ) : (
-        <span className="absolute inset-0 bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgb(255_255_255/0.04)_7px_14px)]" aria-hidden />
+        <span className="tile-empty absolute inset-0" aria-hidden />
       )}
-      <span className="mono absolute left-1 top-0.5 text-micro leading-tight text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,.9)]">{cardLabel(shot)}</span>
-      <span className="mono absolute inset-x-1 bottom-0.5 truncate text-micro leading-tight text-white/75 [text-shadow:0_1px_2px_rgba(0,0,0,.9)]">
+      <span className="mono absolute left-1 top-0.5 rounded-ctl bg-scrim/70 px-1 text-micro leading-tight text-on-scrim">{cardLabel(shot)}</span>
+      <span className="mono absolute inset-x-1 bottom-0.5 truncate rounded-ctl bg-scrim/70 px-1 text-micro leading-tight text-on-scrim-dim">
         {tc}
         {playable ? "" : " ·"}
       </span>
       {playable && (
-        <span className="absolute inset-0 grid place-items-center bg-black/25 opacity-0 transition-opacity group-hover:opacity-100">
-          <Play className="h-5 w-5 text-white" fill="currentColor" aria-hidden />
+        <span className="absolute inset-0 grid place-items-center bg-scrim/40 opacity-0 transition-opacity group-hover:opacity-100">
+          <Play className="h-5 w-5 text-on-scrim" fill="currentColor" aria-hidden />
         </span>
       )}
     </button>

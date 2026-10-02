@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CircleCheck, Clapperboard, Images, Loader2, Video } from "lucide-react";
 import { Badge, Button, Empty, Modal, Panel, Progress, Skeleton, StateGlyph, StateLabel, Toggle, type StateKey } from "../../components/ui";
 import { useApi } from "../../lib/apiClient";
-import { keys, useGpuState, useInstances, useMedia, useProject, useProjectMutations } from "../../lib/hooks";
+import { keys, useGpuState, useInstances, useMedia, useProject, useProjectMutations, useInstancePointerSync } from "../../lib/hooks";
 import { keyframeRequest, renderProgress, videoRequest } from "../../lib/generate";
 import type { GenTarget } from "../../lib/generate";
 import type { GenerateRequest, JobPlanResult } from "../../lib/api";
@@ -36,6 +36,9 @@ export default function Director() {
   const { data: gpu } = useGpuState();
   const mut = useProjectMutations(id);
   const gen = useGenerator(id);
+
+  // 与资产页同一条防护：项目里存着已被删掉的实例 id 时当场对齐，别等每条出片都撞墙
+  useInstancePointerSync(project, (changes) => setToast({ msg: `实例指针已对齐：${changes.join("；")}`, tone: "ok" }));
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<null | "frames" | "videos">(null);
@@ -253,10 +256,34 @@ export default function Director() {
           <span className="mono text-note text-ink-mute">
             <span className="text-ink">{progress.done}</span> / {progress.total} 完成
           </span>
-          <Button size="sm" icon={<Images className="h-3.5 w-3.5" />} disabled={handleEntries.length > 0 || !shots.length} onClick={() => void openPlan("frames")}>
+          <Button
+            size="sm"
+            icon={<Images className="h-3.5 w-3.5" />}
+            disabled={handleEntries.length > 0 || !shots.length}
+            title={
+              handleEntries.length
+                ? `已有 ${handleEntries.length} 个任务在跑：批量派发会一次上几十条，等这一批收口再点`
+                : !shots.length
+                  ? "还没有镜头：先去剧本页生成分镜脚本"
+                  : ""
+            }
+            onClick={() => void openPlan("frames")}
+          >
             {startFrames === shots.length && startFrames > 0 ? "重新生成所有首帧" : "生成所有首帧"}
           </Button>
-          <Button size="sm" icon={<Video className="h-3.5 w-3.5" />} disabled={handleEntries.length > 0 || !shots.length} onClick={() => void openPlan("videos")}>
+          <Button
+            size="sm"
+            icon={<Video className="h-3.5 w-3.5" />}
+            disabled={handleEntries.length > 0 || !shots.length}
+            title={
+              handleEntries.length
+                ? `已有 ${handleEntries.length} 个任务在跑：批量出片按秒计费按分钟占卡，等这一批收口再点`
+                : !shots.length
+                  ? "还没有镜头：先去剧本页生成分镜脚本"
+                  : ""
+            }
+            onClick={() => void openPlan("videos")}
+          >
             {progress.done > 0 ? "重新生成所有视频" : "生成所有视频"}
           </Button>
           <span className="label inline-flex items-center gap-1">
@@ -361,7 +388,7 @@ export default function Director() {
       {/* 批量派发前的参数确认表：一条成片要烧十几分钟，参数必须先看清楚 */}
       <Modal open={confirm !== null} onClose={() => setConfirm(null)} title={`${confirm === "frames" ? "首帧" : "成片"}参数确认 · ${planItems.length} 条`} width={980}>
         <div className="space-y-2.5">
-          <p className="text-[11.5px] leading-snug text-ink-mute">
+          <p className="text-caption leading-snug text-ink-mute">
             派发会覆盖这些镜头已有的{confirm === "frames" ? "首帧" : "成片"}。数值可以直接在下表改，改完自动重新问一次后端；
             被拦下的条目不进队列（后端 /jobs/batch 用的是同一套判断，不是这里另写一份）。
             {project.config.resolutionMode === "full" && (

@@ -5,6 +5,7 @@ import type {
   LlmBackend,
   Media,
   Project,
+  Skill,
   User,
   Workflow,
   WorkflowSlot,
@@ -300,6 +301,61 @@ export const seedWorkflows: Workflow[] = [
     isBuiltin: false,
     updatedAt: iso(9 * 86_400_000),
     requirements: { customNodes: ["ComfyUI_MiniMaxH3_Director"] },
+  },
+];
+
+/**
+ * 技能库（演示模式那一份）。真源在服务端 skills 表，这里只让界面在没有后端时也能演
+ * 「挂一条技能 → 随提示词一起发给模型」。正文就是发给模型的附加要求，照真库的写法给短句。
+ */
+export const seedSkills: Skill[] = [
+  {
+    id: "sk_cold_open",
+    uuid: "sk_cold_open",
+    name: "冷开场：三秒给一个悬念",
+    description: "开头不解释人物关系，只给一件看得见的反常事",
+    content: "开场第一个画面必须有一个不合情境的物件或动作；不写人物心理，只写镜头拍得到的东西；第一句台词不回答上一句。",
+    stage: "script",
+    tags: ["开场", "节奏"],
+    origin: "manual",
+    source: null,
+    updatedAt: iso(3 * 86_400_000),
+  },
+  {
+    id: "sk_restraint",
+    uuid: "sk_restraint",
+    name: "画面克制：只写拍得到的",
+    description: "去掉评价词，换成光线与材质",
+    content: "不写「很美」「震撼」「有氛围」这类评价词；每个形容词都要落到构图、景别、机位、光线方向、色温或材质上；主体只写一个，其余交代清前后景关系。",
+    stage: "asset",
+    tags: ["画面", "出图"],
+    origin: "manual",
+    source: null,
+    updatedAt: iso(2 * 86_400_000),
+  },
+  {
+    id: "sk_continuity",
+    uuid: "sk_continuity",
+    name: "镜头接续：把受力交给下一镜",
+    content: "本镜结尾留一个未完成的物理过程（门在合、水在漫、头在转），下一镜从同一股受力上接住；不用「同景别重复描述」当接续。",
+    description: "接缝接在动作与受力上，不是接在景别上",
+    stage: "video",
+    tags: ["接续", "出片"],
+    origin: "imported",
+    source: "接续四法.json",
+    updatedAt: iso(86_400_000),
+  },
+  {
+    id: "sk_no_text",
+    uuid: "sk_no_text",
+    name: "通用：画面里不出现可读文字",
+    description: "招牌、字幕、水印一律糊成不可辨",
+    content: "画面内的文字元素一律写成虚化的色块或不可辨认笔画；不生成字幕，不给 logo 命名。",
+    stage: "general",
+    tags: ["负向"],
+    origin: "manual",
+    source: null,
+    updatedAt: iso(6 * 3600_000),
   },
 ];
 

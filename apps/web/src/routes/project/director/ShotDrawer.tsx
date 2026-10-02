@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, ChevronLeft, ChevronRight, Film, MapPin, MessageSquare, Scissors, Sparkles, Video, Wand2, X } from "lucide-react";
 import { Badge, Button, Input, MachChip, Panel, Progress, Select, StateGlyph, type StateKey, Toggle } from "../../../components/ui";
+import { GenPresetPicker } from "../../../components/GenPresetPicker";
+import { SkillPicker } from "../../../components/SkillPicker";
 import { SplitHandle, usePane } from "../../../components/SplitPane";
 import { VersionGroup } from "../../../components/VersionHistory";
 import { videoChainShots, videoRequest } from "../../../lib/generate";
@@ -67,7 +69,7 @@ export function ShotDrawer({
   const modeMeta = h3ModeMeta(ctx.project.config.h3PromptMode);
   const prevShot = index > 0 ? ctx.shots[index - 1] : null;
   const videoHandle = ctx.handles[genKey({ kind: "video", shotId: shot.id } satisfies GenTarget)];
-  const inst = instances?.find((i) => i.id === (shot.instanceId ?? ctx.project.config.videoInstanceId));
+  const inst = instances?.find((i) => i.id === (shot.preset?.instanceId ?? shot.instanceId ?? ctx.project.config.videoInstanceId));
   const hasStart = !!frameMediaId(shot, "start");
   // 连着几个「承接上一镜」就是几段：段数 >1 时出片改走无缝续拍节点
   const chainLen = videoChainShots(ctx.project, shot).length;
@@ -87,7 +89,7 @@ export function ShotDrawer({
         起始帧提示词: frameOf(shot, "start")?.visualPrompt ?? "",
         结束帧提示词: frameOf(shot, "end")?.visualPrompt ?? "",
       });
-      const res = await ctx.api.llm.run("visualize", brief, { backendId: ctx.project.config.llmBackendId ?? undefined });
+      const res = await ctx.api.llm.run("visualize", brief, { backendId: ctx.project.config.llmBackendId ?? undefined, skillIds: shot.skillIds });
       const text = ((res.data as { visualPrompt?: string }).visualPrompt ?? "").trim();
       if (!text) {
         ctx.notify("模型没给出可用的动作建议", "bad");
@@ -128,6 +130,7 @@ export function ShotDrawer({
         durationSec: shot.durationSec,
         aspect: ctx.project.config.aspectRatio,
         style: ctx.project.config.visualStyle,
+        skillIds: shot.skillIds,
       });
       const d = res.data as Partial<H3Prompt>;
       const keep = (v: string | undefined, fallback: string) => (typeof v === "string" && v.trim() ? v.trim() : fallback);
@@ -246,7 +249,7 @@ export function ShotDrawer({
                 placeholder="动作方向 / 视线目标 / 同一道光 / 同一个道具 / 同一种轮廓 / 同一段声音 / 同一股受力，写成一句看得见的话"
                 onCommit={(v) => ctx.patchShot(shot.id, { continuityAnchor: v })}
               />
-              <p className="mt-1 text-[10.5px] leading-snug text-ink-mute">
+              <p className="mt-1 text-caption leading-snug text-ink-mute">
                 {prevShot ? (
                   <>
                     上一镜是 <span className="mono">{cardLabel(prevShot)}</span>：{prevShot.action || "没写动作"}。这句会被拼进视频提示词，属于
@@ -336,21 +339,13 @@ export function ShotDrawer({
               <div className="flex items-center gap-2">
                 <span className="label-mono">出片</span>
                 {inst && <MachChip placement={inst.placement} label={inst.name} />}
-                <Select
-                  className="ml-auto h-6 max-w-[150px] text-caption"
-                  aria-label="出片实例"
-                  value={shot.instanceId ?? ""}
-                  onChange={(e) => ctx.patchShot(shot.id, { instanceId: e.target.value || null })}
-                >
-                  <option value="">跟随项目默认</option>
-                  {(instances ?? []).map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name}
-                      {i.lastProbeOk ? "" : "（不可用）"}
-                    </option>
-                  ))}
-                </Select>
+                {chainLen > 1 && (
+                  <span className="ml-auto text-caption text-ink-mute" title="多段无缝拼接只有 SequenceForge 那个节点做得了，库里的工作流没有这个形状">
+                    续拍链固定走内置模板，工作流这一项用不上
+                  </span>
+                )}
               </div>
+              <GenPresetPicker project={ctx.project} kind="video" value={shot.preset} onChange={(p) => ctx.patchShot(shot.id, { preset: p })} compact />
               {prevShot && (
                 <div className="rounded-ctl border border-rule-soft bg-sheen px-2 py-1.5">
                   <Toggle
@@ -578,6 +573,8 @@ function H3PromptFields({ ctx, shot }: { ctx: DirectorCtx; shot: Shot }) {
         placeholder={`留空则提交这一串：\n\n${h3PromptText(incomplete && !shot.videoPrompt ? rebuilt : shot.h3Prompt)}`}
         onCommit={(v) => ctx.patchShot(shot.id, { videoPrompt: v })}
       />
+      {/* 技能挂在这个框上：勾中的正文由后端并进这次出片的提示词，框里仍是你自己写的那串 */}
+      <SkillPicker stage="video" value={shot.skillIds} onChange={(ids) => ctx.patchShot(shot.id, { skillIds: ids })} />
       {incomplete && (
         <p className="flex items-start gap-1.5 text-caption leading-snug text-state-fail">
           <AlertCircle className="mt-[1px] h-3 w-3 flex-none" />
@@ -589,13 +586,13 @@ function H3PromptFields({ ctx, shot }: { ctx: DirectorCtx; shot: Shot }) {
       <div className="space-y-1.5">
         {MODE_FIELDS[mode].map((f) => (
           <label key={String(f.key)} className="block min-w-0 space-y-1">
-            <span className="mono block truncate text-micro text-ink-mute">{f.label}</span>
+            <span className="mono block truncate text-caption text-ink-mute">{f.label}</span>
             <CommitText ariaLabel={`H3 ${String(f.key)}`} value={String(shot.h3Prompt[f.key] ?? "")} rows={f.rows} mono onCommit={(v) => setH3(f.key, v)} />
           </label>
         ))}
         {mode === "wenwu" && (
           <label className="block min-w-0 space-y-1">
-            <span className="mono block truncate text-micro text-ink-mute">二、分定时镜头块（块之间空一行）</span>
+            <span className="mono block truncate text-caption text-ink-mute">二、分定时镜头块（块之间空一行）</span>
             <CommitText
               ariaLabel="H3 shotBlocks"
               value={(shot.h3Prompt.shotBlocks ?? []).join("\n\n")}

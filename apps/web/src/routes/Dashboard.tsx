@@ -39,7 +39,7 @@ export default function Dashboard() {
         {/* ───────── 左：入口栏 ───────── */}
         <aside style={pane.style} className="sticky top-7 hidden w-[var(--pane-w)] flex-none lg:block">
           <SplitHandle pane={pane} side="left" label="入口栏宽度" />
-          <div className="glass rounded-sheet p-5 shadow-2xl shadow-black/30">
+          <div className="glass rounded-panel p-5 shadow-2xl shadow-black/30">
             <div className="flex items-center gap-2.5">
               <span className="grid h-8 w-8 flex-none place-items-center rounded-tile bg-gradient-to-br from-chrome to-chrome-2 text-chrome-ink">
                 <Layers className="h-4 w-4" aria-hidden />
@@ -52,7 +52,7 @@ export default function Dashboard() {
               </span>
             </div>
 
-            <div className="label-mono mt-6 text-chrome/70">Studio Lobby</div>
+            <div className="label-mono mt-6 text-chrome">Studio Lobby</div>
             <h1 className="mt-2 text-display font-semibold leading-none tracking-tight">项目库</h1>
             <p className="mt-3 text-note leading-relaxed text-ink-mute">
               从故事草稿到制片导出，集中管理你的短剧项目和可复用视觉资产。
@@ -88,7 +88,7 @@ export default function Dashboard() {
         {/* ───────── 右：项目网格 ───────── */}
         <main className="min-w-0 flex-1 space-y-7">
           <header className="lg:hidden">
-            <div className="label-mono text-chrome/70">Studio Lobby</div>
+            <div className="label-mono text-chrome">Studio Lobby</div>
             <h1 className="mt-1.5 text-display font-semibold tracking-tight">项目库</h1>
             <div className="mt-4 grid grid-cols-2 gap-2">
               <LobbyPrimary icon={<Plus className="h-3.5 w-3.5" aria-hidden />} onClick={() => setCreating(true)}>
@@ -116,7 +116,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               <button
                 onClick={() => setCreating(true)}
-                className="group flex h-[244px] flex-col items-center justify-center gap-5 rounded-sheet border border-dashed border-chrome/25 bg-sheen backdrop-blur-xl transition-colors hover:border-chrome/60 hover:bg-chrome/10"
+                className="group flex h-[244px] flex-col items-center justify-center gap-5 rounded-panel border border-dashed border-chrome/25 bg-sheen backdrop-blur-xl transition-colors hover:border-chrome/60 hover:bg-chrome/10"
               >
                 <span className="grid h-14 w-14 place-items-center rounded-panel border border-chrome/25 bg-chrome/10 text-chrome transition-colors group-hover:bg-chrome/20">
                   <FolderPlus className="h-5 w-5" aria-hidden />

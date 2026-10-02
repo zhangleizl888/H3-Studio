@@ -218,7 +218,7 @@ function SceneGroup({
   return (
     <section className="rounded-panel border border-rule-soft bg-panel">
       <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-rule-soft px-4 py-3">
-        <span className="mono text-display leading-none text-ink-mute/70">{String(order + 1).padStart(2, "0")}</span>
+        <span className="mono text-display leading-none text-ink-mute">{String(order + 1).padStart(2, "0")}</span>
         <h3 className="text-subtitle font-semibold tracking-wide text-ink">{name}</h3>
         {time ? (
           <span className="inline-flex items-center gap-1 rounded-full border border-rule px-2 py-[1px] text-caption text-ink-dim">

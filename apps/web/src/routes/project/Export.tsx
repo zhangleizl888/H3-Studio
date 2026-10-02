@@ -6,6 +6,7 @@ import { useApi } from "../../lib/apiClient";
 import { renderProgress } from "../../lib/generate";
 import { useExportMutations, useMedia, useProject } from "../../lib/hooks";
 import { flushSaves } from "../../lib/localStores";
+import { useProjectReconcile } from "../../lib/useGenerate";
 import { cn, fmtTime } from "../../lib/utils";
 import { MasterCard } from "./export/MasterCard";
 import { PreviewModal } from "./export/PreviewModal";
@@ -30,6 +31,7 @@ export default function Export() {
   const { data: project, error: projectErr } = useProject(id);
   const { data: mediaRows } = useMedia(id);
   const exp = useExportMutations(id ?? "");
+  useProjectReconcile(project);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);

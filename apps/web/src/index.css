@@ -41,18 +41,32 @@
   --color-sheen-hi: rgb(255 255 255 / 0.11); /* 两层：hover / 选中，必须比 sheen 明显更亮 */
   --color-scrim: #04070b; /* 压在影像上的遮罩：两主题都保持深底，不随主题翻转 */
 
+  /* —— 遮罩上的前景 ——
+     scrim 是唯一一个「浅色主题也不翻转」的底，所以压在它上面的文字也不能翻转。
+     这里直接复用深色的 ink 两档，但另起名字：ProjectCard 的删除确认层以前写的是
+     text-ink，浅色主题下 ink 翻成近黑 #10202f，压在永远深黑的 scrim 上只有 1.2:1。 */
+  --color-on-scrim: #e8eff7;
+  --color-on-scrim-dim: #a7b8cb;
+
   /* —— 机器身份色（数据色相，整套 UI 唯一的语义色来源）—— */
   --color-mach-local: #4ade80; /* 本机 ComfyUI：翡翠，免费且完全可控 */
   --color-mach-self: #a78bfa; /* 自建云端：紫罗兰 */
   --color-mach-rh: #fbbf24; /* RunningHub：琥珀，同时也是「在花钱」的颜色 */
 
   /* —— 状态：亮度 + 图形，不新增色相 —— */
-  --color-state-idle: #45566b;
+  /* idle 是「待处理」的那颗小色点，不是装饰：深色下它要压得住 panel/贴图/骨架三种面。
+     #45566b 时只有 2.1~2.3:1 —— 那颗点等于没画出来。提到 #64748b 后最差面 3.04:1。 */
+  --color-state-idle: #64748b;
   --color-state-queued: #7d93ab;
   --color-state-running: #b7ecf6; /* 高亮 + 条纹动画；条纹用所在机器的色相 */
   --color-state-ok: #86efac;
   --color-state-fail: #fb7185;
   --color-state-canceled: #8a7a68;
+  /* warn 必须是真 token：GenPresetPicker 三处写的是 var(--color-state-warn, #b8860b)，
+     而这个变量此前从没定义过 —— 兜底的暗金 #b8860b 在浅色主题上只有 3.25:1，静默失效。
+     深色沿用琥珀（与 RunningHub 同色相，那里它表示「在花钱」，这里表示「要人看一眼」）；
+     浅色另给一档，因为 #b45309 压在进度底槽上只有 3.99:1。 */
+  --color-state-warn: #fbbf24;
 
   /* —— 排版 —— */
   --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
@@ -82,6 +96,12 @@
   --radius-strip: 0px;
   --radius-hairline: 1px; /* 1px 高的进度条：圆角再大就看不见了 */
 
+  /* —— 投影：只有两档，并且随主题翻转 ——
+     原来弹窗各自写死 shadow-[0_18px_50px_rgba(0,0,0,.55)] / .6 / ChatDock .5，浅色主题下
+     等于在白纸上抹黑。浅色改成带墨色的低透明度投影，只表示「浮起来了」。 */
+  --shadow-pop: 0 10px 30px rgb(0 0 0 / 0.5); /* 贴在界面上的浮层：气泡、悬浮条 */
+  --shadow-sheet: 0 18px 50px rgb(0 0 0 / 0.55); /* 模态与抽屉这类整张面板 */
+
   /* —— 动效曲线 ——
      四条曲线来自 beautifului.dev 的 AI 原生交互原型（21 个组件里反复出现的就这几条）：
        glide  面板/卡片进入、展开收起：起步快、尾段长拖尾，界面「落」而不是「撞」
@@ -91,6 +111,12 @@
   --ease-glide: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-pop: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-std: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 全站绝大多数 transition 类都没写 duration-*，于是落到 Tailwind 默认的 150ms ——
+     那不在「160/260/300/350/400」五档里。这里一次性把缺省值定到 160 + std 曲线，
+     比在几十个调用点各补一个 duration-160 更不容易再漏。 */
+  --default-transition-duration: 160ms;
+  --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ============ 基线 ============ */
@@ -171,6 +197,17 @@ body {
   color: var(--color-ink-mute);
 }
 
+/* 遮罩层的前景：scrim 在两套主题下都是深底，所以压在它上面的字也必须有固定浅色。
+   以前删除确认层写的是 text-ink —— 浅色主题下 ink 翻成近黑，压在 #04070b 上只有 1.2:1。
+   给容器加 .on-scrim，后代文字（含 .label-mono 这种自带 color 的）一律转到 on-scrim 档。 */
+.on-scrim {
+  color: var(--color-on-scrim);
+}
+.on-scrim .label-mono,
+.on-scrim .label {
+  color: var(--color-on-scrim-dim);
+}
+
 /* 引用条：项目 logline / 提示词预览用这一条竖线，而不是套一层卡片 */
 .quote-bar {
   border-left: 1px solid color-mix(in srgb, var(--color-chrome) 30%, transparent);
@@ -227,6 +264,16 @@ body {
   to {
     background-position: 24px 0;
   }
+}
+
+/* 时间轴上「还没有画面」的格子：斜条纹必须随主题翻转。
+   原来写死 rgb(255 255 255/0.04)，浅色主题下格子本来就是白的，等于什么都没画出来。 */
+.tile-empty {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 7px,
+    color-mix(in srgb, var(--color-ink) 6%, transparent) 7px 14px
+  );
 }
 
 /* ============ 动效层：AI 对话界面的节奏 ============ */
@@ -290,7 +337,7 @@ body {
 }
 
 .anim-fade-in {
-  animation: fade-in 350ms ease-out both;
+  animation: fade-in 350ms var(--ease-glide) both;
 }
 .anim-fade-up {
   animation: fade-up 300ms var(--ease-glide) calc(var(--i, 0) * 70ms) both;
@@ -417,18 +464,22 @@ body {
   --color-hairline: rgb(16 32 47 / 0.14);
   --color-sheen: rgb(16 32 47 / 0.06);
   --color-sheen-hi: rgb(16 32 47 / 0.11);
-  --color-chrome: #0891b2;
-  --color-chrome-2: #0284c7;
+  --color-chrome: #0a6e85;
+  --color-chrome-2: #0369a1;
   --color-chrome-ink: #f6fbfd;
   --color-mach-local: #15803d;
   --color-mach-self: #6d28d9;
   --color-mach-rh: #b45309;
-  --color-state-idle: #b7c2cf;
-  --color-state-queued: #8798aa;
+  --color-state-idle: #6f869f;
+  --color-state-queued: #5b7089;
   --color-state-running: #0e7490;
   --color-state-ok: #15803d;
   --color-state-fail: #be123c;
   --color-state-canceled: #7c6a55;
+  --color-state-warn: #94590a; /* 浅色下最差的表面还有 4.59:1，能当正文读 */
+  /* 浅底的投影要往墨蓝走而不是纯黑，否则白面板上像脏了一块 */
+  --shadow-pop: 0 8px 22px rgb(16 32 47 / 0.14);
+  --shadow-sheet: 0 18px 44px rgb(16 32 47 / 0.18);
 }
 [data-theme="light"] .app-bg {
   background:

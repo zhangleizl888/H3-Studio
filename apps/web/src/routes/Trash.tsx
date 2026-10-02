@@ -126,7 +126,7 @@ export default function Trash() {
                     <span className={(it.daysLeft ?? 0) <= 14 ? "mono text-state-fail" : "mono text-ink-dim"}>{it.daysLeft ?? 0} 天</span>
                   </td>
                   <td className="px-2 py-1.5">
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-2">
                       <Button size="sm" variant="ghost" onClick={() => setPreview(it)}>
                         预览
                       </Button>

@@ -9,6 +9,8 @@ import type {
   ProbeReport,
   Project,
   ScriptVersionRow,
+  Skill,
+  SkillImportReport,
   TrashItem,
   User,
   Workflow,
@@ -16,7 +18,7 @@ import type {
 import { RH_ERROR_HINTS } from "../constants";
 import { uid } from "../utils";
 import { dereference } from "../versions";
-import { seedInstances, seedJobs, seedLlmBackends, seedMedia, seedProject, seedUsers, seedWorkflows } from "./db";
+import { seedInstances, seedJobs, seedLlmBackends, seedMedia, seedProject, seedSkills, seedUsers, seedWorkflows } from "./db";
 
 /**
  * mock 层不只是假数据：它模拟了任务的生命周期，
@@ -28,6 +30,7 @@ const store = {
   instances: structuredClone(seedInstances),
   llms: structuredClone(seedLlmBackends),
   workflows: structuredClone(seedWorkflows),
+  skills: structuredClone(seedSkills),
   media: structuredClone(seedMedia),
   projects: [structuredClone(seedProject)],
   jobs: structuredClone(seedJobs),
@@ -353,6 +356,13 @@ export const mockApi: Api = {
     async logout() {
       store.session = null;
     },
+    async changePassword(current, next) {
+      await delay();
+      // 原型模式不存口令（登录时任意 ≥4 位都放行），所以这里只能按同一条规则演一遍拒绝路径
+      if (current.length < 4) throw new Error("当前口令不正确");
+      if (next === current) throw new Error("新口令和当前口令一样");
+      if (next.length < 4) throw new Error("口令至少 4 位");
+    },
     async setupRequired() {
       return false;
     },
@@ -372,7 +382,7 @@ export const mockApi: Api = {
         placement: body.placement ?? "local",
         baseUrl: body.baseUrl ?? "",
         wsUrl: body.wsUrl ?? null,
-        apiKeySet: !!body.apiKeySet,
+        apiKeySet: !!body.apiKey,
         site: body.site,
         instanceType: body.instanceType,
         retainSeconds: body.retainSeconds ?? null,
@@ -408,6 +418,16 @@ export const mockApi: Api = {
       if (r.ok && r.native) i.capabilities = { ...i.capabilities, ...r.native.caps };
       if (r.ok && r.task?.queue) i.quota = { ...i.quota, ...r.task.queue };
       return r;
+    },
+    async ping(id) {
+      await delay(60);
+      const i = store.instances.find((x) => x.id === id)!;
+      const ok = i.lastProbeOk !== false;
+      if (i) {
+        i.lastProbeAt = new Date().toISOString();
+        i.lastProbeOk = ok;
+      }
+      return { ok, instanceId: id, running: ok && i.quota?.runningCount ? i.quota.runningCount : 0, queued: i.quota?.queuedCount ?? 0, error: ok ? null : i.lastError ?? "原型模式：这台实例标着离线" };
     },
     async dryProbe(body) {
       await delay(320);
@@ -594,19 +614,23 @@ export const mockApi: Api = {
       const w = store.workflows.find((x) => x.id === id)!;
       return clone(w);
     },
-    async importJson(name, json, instanceId) {
+    async importJson(body) {
       await delay(700);
-      const report = buildImportReport(json, instanceId);
+      const report = buildImportReport(body.json, body.instanceId);
       const w: Workflow = {
         id: uid("wf"),
-        name,
-        description: "用户导入",
-        tags: ["导入"],
+        name: body.name,
+        description: body.description || "用户导入",
+        tags: body.tags?.length ? body.tags : ["导入"],
         family: report.estimated ? "video" : "image",
         sourceFormat: report.sourceFormat,
         graph: {},
         slots: [],
         isBuiltin: false,
+        priority: body.priority ?? 100,
+        autoSelect: true,
+        bindings: {},
+        sourceFile: `${body.name}.json`,
         updatedAt: new Date().toISOString(),
       };
       store.workflows.unshift(w);
@@ -639,32 +663,10 @@ export const mockApi: Api = {
     async modelOptions(id, instanceId) {
       const w = store.workflows.find((x) => x.id === id);
       const kind = w?.taskKind ?? w?.family ?? "video";
-      const preset =
-        kind === "image"
-          ? [
-              { node: "501", field: "unet_name", classType: "UNETLoader", label: "Qwen-Image DiT", role: "底模", options: ["qwen_image_2.1_int8_convrot.safetensors", "qwen_image_2.1_bf16.safetensors", "flux2_klein_base_fp8.safetensors"] },
-              { node: "502", field: "clip_name", classType: "CLIPLoader", label: "文本编码器", role: "文本编码器", options: ["qwen3vl_8b_bf16.safetensors"] },
-              { node: "503", field: "vae_name", classType: "VAELoader", label: "VAE", role: "VAE", options: ["qwen_image_2.1_vae_bf16.safetensors"] },
-            ]
-          : kind === "audio"
-            ? [{ node: "43", field: "model_name", classType: "FB_Qwen3TTSVoiceClone", label: "TTS 模型", role: "模型", options: ["qwen3_tts_base.safetensors"] }]
-            : [
-                { node: "127", field: "unet_name", classType: "UNETLoader", label: "H3 底模", role: "底模", options: ["MiniMax_H3_FL2VA_pruned_int8.safetensors", "MiniMax_H3_REF2VA_pruned_int8.safetensors"] },
-                { node: "128", field: "clip_name", classType: "CLIPLoader", label: "H3 文本编码器", role: "文本编码器", options: ["minimax_h3_qwen3vl_32b_int8.safetensors"] },
-                { node: "119", field: "vae_name", classType: "VAELoader", label: "视频 VAE", role: "VAE", options: ["minimax_h3_video_vae.safetensors"] },
-                { node: "140", field: "lora_name", classType: "LoraLoaderModelOnly", label: "Turbo LoRA（只在加速档挂得上）", role: "LoRA 适配器", options: ["MiniMaxH3_FL2V_Turbo_8step_v10_ComfyUI_bf16.safetensors"] },
-              ];
-      const slots: ModelSlot[] = preset.map((p) => ({
-        key: `${p.node}.${p.field}`,
-        node: p.node,
-        field: p.field,
-        classType: p.classType,
-        label: p.label,
-        role: p.role,
-        current: p.options[0] ?? "",
-        options: p.options,
-        missing: false,
-      }));
+      const slots = demoModelPreset(kind).map((s) => {
+        const bound = (demoBindings[id] ?? {})[instanceId ?? ""]?.[s.key];
+        return bound ? { ...s, current: bound } : s;
+      });
       return {
         workflowId: id,
         workflowName: w?.name ?? id,
@@ -674,6 +676,137 @@ export const mockApi: Api = {
         primary: slots[0]?.key ?? null,
         slots,
         notes: ["原型模式：这份清单是演示数据，没有问过实例"],
+      };
+    },
+    async bindings(id) {
+      const w = store.workflows.find((x) => x.id === id);
+      return {
+        workflowId: id,
+        workflowName: w?.name ?? id,
+        bindings: Object.entries(demoBindings[id] ?? {}).map(([instanceId, overrides]) => {
+          const inst = store.instances.find((i) => i.id === instanceId);
+          return {
+            instanceId,
+            instanceName: inst?.name ?? `实例 ${instanceId}`,
+            placement: inst?.placement ?? "local",
+            source: "manual" as const,
+            overrides,
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      };
+    },
+    async saveBindings(id, body) {
+      await delay(220);
+      const clean = Object.fromEntries(Object.entries(body.overrides).filter(([, v]) => String(v || "").trim()));
+      demoBindings[id] ??= {};
+      if (Object.keys(clean).length) demoBindings[id][body.instanceId] = clean;
+      else delete demoBindings[id][body.instanceId];
+      return { workflowId: id, instanceId: body.instanceId, overrides: clean };
+    },
+    async clearBindings(id, instanceId) {
+      await delay(160);
+      delete demoBindings[id]?.[instanceId];
+    },
+    async syncBindings(id, body) {
+      await delay(600);
+      const align = body.alignUnbound ?? true;
+      return {
+        workflowId: id,
+        workflowName: store.workflows.find((x) => x.id === id)?.name ?? id,
+        sourceInstanceId: body.sourceInstanceId,
+        results: body.targetInstanceIds.filter((i) => i !== body.sourceInstanceId).map((iid) => demoSyncOne(id, iid, align)),
+      };
+    },
+    async syncAll(body) {
+      await delay(900);
+      const align = body.alignUnbound ?? true;
+      const targets = body.targetInstanceIds.filter((i) => i !== body.sourceInstanceId);
+      const rows = store.workflows.filter((w) => body.includeBuiltin || !w.isBuiltin);
+      let written = 0;
+      let aligned = 0;
+      let skipped = 0;
+      const workflows = rows.map((w) => {
+        const sourceBound = Object.keys(demoBindings[w.id]?.[body.sourceInstanceId] ?? {}).length;
+        if (body.onlyMissing && targets.every((t) => Object.keys(demoBindings[w.id]?.[t] ?? {}).length)) {
+          return { workflowId: w.id, workflowName: w.name, untouched: true, reason: "目标上都已经配过", results: [] };
+        }
+        const results = targets.map((t) => demoSyncOne(w.id, t, align));
+        for (const r of results) {
+          written += r.written;
+          aligned += r.aligned.length;
+          skipped += r.skipped.length;
+        }
+        return { workflowId: w.id, workflowName: w.name, sourceBound, results };
+      });
+      return {
+        sourceInstanceId: body.sourceInstanceId,
+        targets,
+        onlyMissing: !!body.onlyMissing,
+        includeBuiltin: !!body.includeBuiltin,
+        workflows,
+        totals: { workflows: workflows.length, written, aligned, skipped, blocked: 0 },
+      };
+    },
+    async check(id, instanceIds) {
+      await delay(700);
+      const w = store.workflows.find((x) => x.id === id);
+      const kind = w?.taskKind ?? w?.family ?? "video";
+      const slots = demoModelPreset(kind).map((s) => {
+        const bound = (demoBindings[id] ?? {})[instanceIds?.[0] ?? ""]?.[s.key];
+        return { ...s, bound: bound ?? "", effective: bound || s.current };
+      });
+      const insts = store.instances.filter((i) => !instanceIds?.length || instanceIds.includes(i.id));
+      return {
+        workflowId: id,
+        workflowName: w?.name ?? id,
+        taskKind: String(kind),
+        mode: String(w?.mode ?? kind),
+        modeLabel: String(w?.modeLabel ?? ""),
+        reports: insts.map((i) => ({
+          instanceId: i.id,
+          instanceName: i.name,
+          placement: i.placement,
+          protocol: i.protocol,
+          reachable: i.lastProbeOk !== false,
+          error: i.lastProbeOk === false ? (i.lastError ?? "原型模式：这台实例标着离线") : null,
+          ok: (w?.gaps?.length ?? 0) === 0 && i.lastProbeOk !== false,
+          problems: [
+            ...((w?.gaps?.length ?? 0) > 0 ? [`原型数据里这条还标着 ${w?.gaps?.length} 处缺口`] : []),
+            ...(i.lastProbeOk === false ? ["Server 连接失败（原型模式按列表里的探活状态判）"] : []),
+          ],
+          gaps: w?.gaps ?? [],
+          models: slots,
+          binding: (demoBindings[id] ?? {})[i.id] ?? {},
+          weightProblems: [],
+          taskKind: kind,
+          nodeCount: w?.nodeCount ?? 0,
+          verifiedAt: w?.verifiedAt ?? null,
+          autoSelect: w?.autoSelect ?? true,
+          priority: w?.priority ?? 100,
+          signals: (w?.signals ?? []).map((s) => s.name),
+        })),
+      };
+    },
+    async replaceGraph(id, body) {
+      await delay(800);
+      const w = store.workflows.find((x) => x.id === id)!;
+      const report = buildImportReport(body.graph);
+      w.sourceFormat = report.sourceFormat;
+      w.taskKind = report.estimated ? "video" : w.taskKind;
+      w.updatedAt = new Date().toISOString();
+      return {
+        workflow: clone(w),
+        report: {
+          adaptations: w.adaptations ?? [],
+          gaps: w.gaps ?? [],
+          alignment: [],
+          signals: w.signals ?? [],
+          taskKind: String(w.taskKind ?? w.family),
+          executesOn: String(w.executesOn ?? "any"),
+          notes: [`原型模式：只更新了库里的元数据（节点数按 ${report.slotCount} 个槽位算），没有真的按实例重改写`, "节点数原样保留"],
+          prunedBindings: [],
+        },
       };
     },
     async nodeOverrides(id, values) {
@@ -724,6 +857,92 @@ export const mockApi: Api = {
         .sort((a, b) => b.score - a.score)
         .slice(0, 5);
       return { kind, placement: "local", provided, fallbackTemplate: kind === "video" ? "h3_video" : "qwen_image", candidates };
+    },
+  },
+
+  /**
+   * 技能库。判据跟真后端一致：同名走刷新而不是再插一条，环节过滤连着 general 一起给，
+   * 正文不进项目（演示模式没有服务端，就把这份「库」当成内存里的那一份）。
+   */
+  skills: {
+    async list(stage) {
+      await delay();
+      return clone(store.skills.filter((s) => !stage || s.stage === stage || s.stage === "general"));
+    },
+    async create(body) {
+      await delay(240);
+      const name = (body.name || "").trim();
+      if (store.skills.some((s) => s.name === name)) throw new Error(`技能「${name}」已经在库里了，改个名字或直接编辑那一条`);
+      const row: Skill = {
+        id: uid("sk"),
+        uuid: uid("sk"),
+        name,
+        description: (body.description || "").trim(),
+        content: (body.content || "").trim(),
+        stage: body.stage ?? "general",
+        tags: body.tags ?? [],
+        origin: "manual",
+        source: null,
+        updatedAt: new Date().toISOString(),
+      };
+      store.skills = [row, ...store.skills];
+      return clone(row);
+    },
+    async update(id, body) {
+      await delay(240);
+      const row = store.skills.find((s) => s.id === id);
+      if (!row) throw new Error(`技能 ${id} 不在库里`);
+      Object.assign(row, {
+        name: body.name?.trim() || row.name,
+        description: body.description ?? row.description,
+        content: body.content?.trim() || row.content,
+        stage: body.stage ?? row.stage,
+        tags: body.tags ?? row.tags,
+        updatedAt: new Date().toISOString(),
+      });
+      return clone(row);
+    },
+    async remove(id) {
+      await delay();
+      store.skills = store.skills.filter((s) => s.id !== id);
+    },
+    async importFiles(files, library) {
+      await delay(600);
+      const report: SkillImportReport = { files: files.length, created: [], updated: [], skipped: [], errors: [], counts: { created: 0, updated: 0, skipped: 0, errors: 0 } };
+      for (const f of files) {
+        const text = await f.text();
+        const stem = f.name.replace(/\.(json|md|markdown|txt)$/i, "");
+        const entries = parseSkillFile(text, stem.includes("/") ? stem.split("/").pop() ?? stem : stem);
+        if (!entries.length) {
+          report.errors.push({ file: f.name, reason: "认不出技能条目：JSON 要有 content/正文，markdown 要有正文" });
+          continue;
+        }
+        for (const e of entries) {
+          if (!e.name || !e.content) {
+            report.skipped.push({ name: e.name || "（没有名字）", reason: "名称或正文是空的" });
+            continue;
+          }
+          const hit = store.skills.find((s) => s.name === e.name);
+          const row: Skill = hit
+            ? { ...hit, description: e.description, content: e.content, stage: e.stage, tags: e.tags, origin: "imported", source: library || f.name, updatedAt: new Date().toISOString() }
+            : { id: uid("sk"), uuid: uid("sk"), name: e.name, description: e.description, content: e.content, stage: e.stage, tags: e.tags, origin: "imported", source: library || f.name, updatedAt: new Date().toISOString() };
+          if (hit) {
+            store.skills = store.skills.map((s) => (s.id === hit.id ? row : s));
+            report.updated.push(row);
+          } else {
+            store.skills = [row, ...store.skills];
+            report.created.push(row);
+          }
+        }
+      }
+      report.counts = { created: report.created.length, updated: report.updated.length, skipped: report.skipped.length, errors: report.errors.length };
+      return clone(report);
+    },
+    async clear() {
+      await delay(320);
+      const names = store.skills.map((s) => s.name);
+      store.skills = [];
+      return { deleted: names.length, names };
     },
   },
 
@@ -1209,6 +1428,40 @@ export const mockApi: Api = {
       await delay(400);
       return { reclaimableBytes: 3_600_000_000, orphans: dryRun ? 7 : 3, dryRun };
     },
+    async paths() {
+      await delay(40);
+      return {
+        media: { path: "F:/H3/data/media", source: "env" as const },
+        tmp: { path: "F:/H3/data/tmp", source: "env" as const },
+        ffmpeg: { path: "ffmpeg", source: "PATH" as const },
+        needsRestart: [] as string[],
+      };
+    },
+    async savePaths(body) {
+      await delay(240);
+      // 演示模式不落盘：按输入回一份同形状的结果，来源标成 stored 让界面能演「改过了」
+      const wrap = (v: unknown, fallback: string) =>
+        v ? { path: String(v), source: "stored" as const } : { path: fallback, source: "env" as const };
+      const restart = [body.media && "media", body.tmp && "tmp"].filter(Boolean) as string[];
+      return {
+        paths: {
+          media: wrap(body.media, "F:/H3/data/media"),
+          tmp: wrap(body.tmp, "F:/H3/data/tmp"),
+          ffmpeg: wrap(body.ffmpeg, "ffmpeg"),
+          needsRestart: restart,
+        },
+        needsRestart: restart,
+      };
+    },
+    async audit() {
+      await delay(60);
+      return { items: [], total: 0, limit: 80 };
+    },
+    async backup() {
+      await delay(60);
+      // 演示模式连的是浏览器里的假库，没有 pg_dump 可指 —— 照实说不可用，不给能复制的假命令
+      return { available: false, database: "（演示模式：数据在浏览器里，不需要数据库备份）", note: "演示模式不落盘，备份命令不可用。接上真实后端后这里会给真命令。" };
+    },
     async gpu() {
       await delay(40);
       const rendering = store.jobs.some((j) => j.state === "running" || j.state === "dispatching");
@@ -1341,6 +1594,89 @@ function tc(seconds: number): string {
   return `${pad(t / 3600)}:${pad((t % 3600) / 60)}:${pad(t % 60)}:${pad(Math.round((t % 1) * 30))}`;
 }
 
+/**
+ * 原型模式的「演示权重清单」。
+ *
+ * 真后端那条路这份数据是从实例的 /object_info 问出来的；演示模式没有实例可问，
+ * 所以清单是写死的，界面上必须带一句「原型模式：没问过实例」—— 不能让它看起来像真探到了。
+ */
+function demoModelPreset(kind: string): ModelSlot[] {
+  const preset =
+    kind === "image"
+      ? [
+          { node: "501", field: "unet_name", classType: "UNETLoader", label: "Qwen-Image DiT", role: "底模", options: ["qwen_image_2.1_int8_convrot.safetensors", "qwen_image_2.1_bf16.safetensors", "flux2_klein_base_fp8.safetensors"] },
+          { node: "502", field: "clip_name", classType: "CLIPLoader", label: "文本编码器", role: "文本编码器", options: ["qwen3vl_8b_bf16.safetensors"] },
+          { node: "503", field: "vae_name", classType: "VAELoader", label: "VAE", role: "VAE", options: ["qwen_image_2.1_vae_bf16.safetensors"] },
+        ]
+      : kind === "audio"
+        ? [{ node: "43", field: "model_name", classType: "FB_Qwen3TTSVoiceClone", label: "TTS 模型", role: "模型", options: ["qwen3_tts_base.safetensors"] }]
+        : [
+            { node: "127", field: "unet_name", classType: "UNETLoader", label: "H3 底模", role: "底模", options: ["MiniMax_H3_FL2VA_pruned_int8.safetensors", "MiniMax_H3_REF2VA_pruned_int8.safetensors"] },
+            { node: "128", field: "clip_name", classType: "CLIPLoader", label: "H3 文本编码器", role: "文本编码器", options: ["minimax_h3_qwen3vl_32b_int8.safetensors"] },
+            { node: "119", field: "vae_name", classType: "VAELoader", label: "视频 VAE", role: "VAE", options: ["minimax_h3_video_vae.safetensors"] },
+            { node: "140", field: "lora_name", classType: "LoraLoaderModelOnly", label: "Turbo LoRA（只在加速档挂得上）", role: "LoRA 适配器", options: ["MiniMaxH3_FL2V_Turbo_8step_v10_ComfyUI_bf16.safetensors"] },
+          ];
+  return preset.map((p) => ({
+    key: `${p.node}.${p.field}`,
+    node: p.node,
+    field: p.field,
+    classType: p.classType,
+    label: p.label,
+    role: p.role,
+    current: p.options[0] ?? "",
+    options: p.options,
+    missing: false,
+  }));
+}
+
+/** 演示模式的权重绑定：只活在页面这次会话里，刷新就没 —— 真后端才存 PostgreSQL */
+const demoBindings: Record<string, Record<string, Record<string, string>>> = {};
+
+/**
+ * 演示模式的同步：与真后端同一套四类结论，但**没有第二台真机可问**，
+ * 所以「未绑定的位」只能原样报回来（from=to），不能编一个"已换好"的结果。
+ */
+function demoSyncOne(workflowId: string, instanceId: string, align: boolean) {
+  const source = demoBindings[workflowId]?.[instanceId === "" ? "" : instanceId] ?? {};
+  const kind = store.workflows.find((x) => x.id === workflowId)?.taskKind ?? "video";
+  const slots = demoModelPreset(String(kind));
+  const overrides: Record<string, string> = {};
+  const applied: string[] = [];
+  const skipped: { key: string; reason: string }[] = [];
+  const aligned: { key: string; from: string; to: string; role: string }[] = [];
+  for (const [key, value] of Object.entries(source)) {
+    const slot = slots.find((s) => s.key === key);
+    if (!slot) {
+      skipped.push({ key, reason: "图上没有这个节点" });
+      continue;
+    }
+    if (slot.options.includes(value)) {
+      overrides[key] = value;
+      applied.push(`${key} ← ${value}`);
+    } else {
+      skipped.push({ key, reason: `这台没有 ${value}，也没有同族同模式的文件可对上（该位留空，沿用图里写死的）` });
+    }
+  }
+  if (align) {
+    for (const s of slots.filter((x) => !overrides[x.key])) {
+      aligned.push({ key: s.key, from: s.current, to: s.current, role: s.role });
+    }
+  }
+  if (Object.keys(overrides).length) (demoBindings[workflowId] ??= {})[instanceId] = overrides;
+  return {
+    instanceId,
+    instanceName: store.instances.find((i) => i.id === instanceId)?.name ?? instanceId,
+    ok: true,
+    applied,
+    converted: [],
+    aligned,
+    skipped,
+    missingNodes: [],
+    blocked: false,
+    written: Object.keys(overrides).length,
+  };
+}
+
 function buildImportReport(json: string, instanceId?: string): ImportReport {
   let parsed: unknown;
   try {
@@ -1403,4 +1739,59 @@ function buildImportReport(json: string, instanceId?: string): ImportReport {
     estimated: { seconds: 5, frames: 124, width: 864, height: 480, steps: 25 },
     installPlan: community.length ? [`Comfy-Manager 安装：${community.join(" / ")}`] : undefined,
   };
+}
+
+/**
+ * 演示模式的技能文件解析，判据跟后端 routes_skills 一致：
+ * JSON 收单条 / 数组 / {"skills":[...]}，markdown 吃 frontmatter + 正文。
+ */
+function parseSkillFile(text: string, stem: string): { name: string; description: string; content: string; stage: Skill["stage"]; tags: string[] }[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    let data: unknown;
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+    const raw = Array.isArray(data) ? data : typeof data === "object" && data !== null ? ((data as { skills?: unknown[] }).skills ?? [data]) : [];
+    const rows = (Array.isArray(raw) ? raw : []).map((r, i) => (typeof r === "string" ? { name: i === 0 ? stem : `${stem} ${i + 1}`, content: r } : (r ?? {}) as Record<string, unknown>));
+    return rows.map((r, i) => ({
+      name: String(r.name ?? r["名称"] ?? r.title ?? (i === 0 ? stem : `${stem} ${i + 1}`)).trim(),
+      description: String(r.description ?? r["说明"] ?? r.desc ?? "").trim(),
+      content: String(r.content ?? r["正文"] ?? r.body ?? r.instruction ?? r.text ?? "").trim(),
+      stage: normStage(String(r.stage ?? r["环节"] ?? "")),
+      tags: Array.isArray(r.tags) ? (r.tags as unknown[]).map(String) : String(r.tags ?? "").split(/[,，、]/).map((s) => s.trim()).filter(Boolean),
+    }));
+  }
+  const fm = /^\s*---\s*\n([\s\S]*?)\n---\s*\n/.exec(text);
+  const meta: Record<string, string> = {};
+  let body = trimmed;
+  if (fm) {
+    body = text.slice(fm[0].length);
+    for (const line of fm[1].split("\n")) {
+      const at = line.indexOf(":");
+      if (at > 0) meta[line.slice(0, at).trim().toLowerCase()] = line.slice(at + 1).trim().replace(/^["']|["']$/g, "");
+    }
+  }
+  const heading = /^#{1,3}\s*(.+?)\s*$/m.exec(body);
+  const name = (meta.name ?? meta["名称"] ?? heading?.[1] ?? stem).trim();
+  return [
+    {
+      name,
+      description: (meta.description ?? meta["说明"] ?? meta.desc ?? "").trim(),
+      content: (heading && heading[1].trim() === name ? body.slice(heading.index + heading[0].length) : body).trim(),
+      stage: normStage(meta.stage ?? meta["环节"] ?? ""),
+      tags: (meta.tags ?? meta["标签"] ?? "").split(/[,，、]/).map((s) => s.trim()).filter(Boolean),
+    },
+  ];
+}
+
+function normStage(v: string): Skill["stage"] {
+  const s = v.trim().toLowerCase();
+  if (s === "script" || s === "剧本" || s === "编剧") return "script";
+  if (s === "asset" || s === "资产" || s === "角色" || s === "场景" || s === "画面") return "asset";
+  if (s === "video" || s === "视频" || s === "出片" || s === "镜头") return "video";
+  return "general";
 }

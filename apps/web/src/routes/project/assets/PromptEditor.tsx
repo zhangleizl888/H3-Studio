@@ -4,11 +4,15 @@
  * 存的是 character.visualPrompt / scene.visualPrompt —— prompts.ts 的 build*Prompt 见到非空
  * 就优先用它，留空则回到按 traits / 场景三要素现拼。所以「清空」也是一个动作：
  * 手改过之后想回到自动拼装，就得能一键抹掉。
+ *
+ * 底下那排「技能库」挂在同一个框上：选中的技能只存 id（在实体上），正文由后端在提交时
+ * 并进这次发送的提示词。所以框里显示的仍是用户自己写的那串，参数表里看到的是并好之后那串。
  */
 
 import { useEffect, useState } from "react";
 import { Camera, CircleAlert, Pencil, RotateCcw, Save, X } from "lucide-react";
 import { Badge, Button, Copyable, Textarea } from "../../../components/ui";
+import { SkillPicker } from "../../../components/SkillPicker";
 import { cn } from "../../../lib/utils";
 
 export function PromptEditor({
@@ -20,6 +24,8 @@ export function PromptEditor({
   onSave,
   maxHeight = "max-h-[190px]",
   disabled,
+  skillIds,
+  onPatchSkills,
 }: {
   label: string;
   prompt?: string;
@@ -29,6 +35,9 @@ export function PromptEditor({
   onSave: (patch: { visualPrompt: string; negativePrompt: string }) => void;
   maxHeight?: string;
   disabled?: boolean;
+  /** 这个框上挂的技能（技能库里的 id） */
+  skillIds?: string[];
+  onPatchSkills?: (ids: string[]) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(prompt ?? "");
@@ -113,7 +122,7 @@ export function PromptEditor({
           </div>
         </div>
       ) : (
-        <div className={cn("rounded-ctl border border-hairline bg-void/45 px-2.5 py-2", maxHeight, shown ? "overflow-y-auto" : "")}>
+        <div className={cn("rounded-ctl border border-hairline bg-inset px-2.5 py-2", maxHeight, shown ? "overflow-y-auto" : "")}>
           {shown ? (
             <Copyable text={shown} className="block">
               <span className="whitespace-pre-wrap break-words text-note leading-relaxed text-ink-dim">{shown}</span>
@@ -127,6 +136,17 @@ export function PromptEditor({
           {!handEdited && shown && <div className="label mt-1">留空即按上面的资料现拼；保存后以你写的为准。</div>}
           {negative?.trim() && <div className="label mt-1 truncate" title={negative}>负向：{negative}</div>}
         </div>
+      )}
+
+      {onPatchSkills && (
+        <SkillPicker
+          stage="asset"
+          value={skillIds}
+          onChange={onPatchSkills}
+          disabled={disabled}
+          label="技能库"
+          className="pt-0.5"
+        />
       )}
     </div>
   );

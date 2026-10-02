@@ -83,27 +83,28 @@ export function ProjectCard({ project }: { project: Project }) {
   };
 
   return (
-    <article className="group relative flex h-[244px] flex-col overflow-hidden rounded-sheet border border-hairline bg-slate/55 shadow-xl shadow-black/25 backdrop-blur-xl transition-colors hover:border-chrome/40">
+    <article className="group relative flex h-[244px] flex-col overflow-hidden rounded-panel border border-hairline bg-slate/55 shadow-pop backdrop-blur-xl transition-colors hover:border-chrome/40">
       <button
+        type="button"
         onClick={() => nav(`/p/${project.id}/${STAGE_ROUTE[project.stage] ?? "script"}`)}
         className="flex min-h-0 flex-1 flex-col items-start gap-2 p-5 text-left"
       >
         <Folder className="h-8 w-8 flex-none text-chrome/30 transition-colors group-hover:text-chrome/75" aria-hidden />
         <h3 className="line-clamp-1 text-subtitle font-semibold tracking-tight text-ink">{project.name}</h3>
-        <span className="rounded-full border border-chrome/25 bg-chrome/10 px-2 py-[3px] text-caption text-ink-dim">
+        <span className="rounded-ctl border border-chrome/25 bg-chrome/10 px-2 py-[3px] text-caption text-ink-dim">
           {STAGE_LABEL[project.stage] ?? project.stage}
         </span>
         {project.synopsis ? (
           <p className="quote-bar line-clamp-2 text-note leading-relaxed text-ink-mute">{project.synopsis}</p>
         ) : (
-          <p className="quote-bar text-note leading-relaxed text-ink-mute/70">还没有梗概 —— 进剧本页写一句话，拆解时它会当全局上下文。</p>
+          <p className="quote-bar text-note leading-relaxed text-ink-mute">还没有梗概 —— 进剧本页写一句话，拆解时它会当全局上下文。</p>
         )}
         {shots.length > 0 && (
           <div className="mt-auto w-full space-y-1">
-            <div className="h-[3px] w-full overflow-hidden rounded-full bg-hairline">
+            <div className="h-[3px] w-full overflow-hidden rounded-hairline bg-track">
               <div className="h-full bg-gradient-to-r from-chrome to-chrome-2" style={{ width: `${Math.round((done / shots.length) * 100)}%` }} />
             </div>
-            <div className="mono text-micro text-ink-mute">
+            <div className="mono text-caption text-ink-mute">
               {done}/{shots.length} 镜已出片
             </div>
           </div>
@@ -119,22 +120,26 @@ export function ProjectCard({ project }: { project: Project }) {
       </footer>
 
       <button
+        type="button"
         onClick={() => setConfirming(true)}
         title="删除项目"
         aria-label={`删除项目 ${project.name}`}
-        className="absolute right-3 top-3 rounded-ctl p-1.5 text-ink-mute opacity-0 transition-opacity hover:bg-white/10 hover:text-state-fail focus-visible:opacity-100 group-hover:opacity-100"
+        className="absolute right-3 top-3 rounded-ctl p-1.5 text-ink-mute opacity-40 transition-opacity hover:bg-sheen-hi hover:text-state-fail hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
       >
         <Trash2 className="h-3.5 w-3.5" aria-hidden />
       </button>
 
       {confirming && (
-        <div className="absolute inset-0 z-20 flex flex-col justify-center gap-3 bg-scrim/95 p-5 backdrop-blur-xl">
+        // 这层以前是 bg-scrim/95 + text-ink：scrim 两主题都深，ink 却在浅色主题翻成近黑，
+        // 压出来只有 1.2:1 —— 删除确认整块在浅色下读不出。改成正常的 panel 层，
+        // 里面的文字与 Button 变体就都能跟着主题走，不用再养一套「遮罩专用色」。
+        <div className="absolute inset-0 z-20 flex flex-col justify-center gap-3 rounded-panel border border-rule bg-panel p-5">
           <div className="flex items-center gap-2">
             <TriangleAlert className="h-4 w-4 flex-none text-state-fail" aria-hidden />
             <span className="text-body font-semibold text-ink">永久删除「{project.name}」？</span>
           </div>
           <p className="label-mono">此操作无法撤销 · 项目只存在这台浏览器的 IndexedDB 里</p>
-          <ul className="space-y-1 rounded-ctl border border-white/10 bg-white/[0.04] px-3 py-2 text-note text-ink-dim">
+          <ul className="space-y-1 rounded-ctl border border-hairline bg-sheen px-3 py-2 text-note text-ink-dim">
             <li className="flex items-baseline justify-between gap-3">
               <span>角色（含服装变体）</span>
               <span className="mono text-ink">{counts ? counts.characters : "—"}</span>

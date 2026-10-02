@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Eye, FileUp, GitCompare, MessageSquareText, Paperclip, Plus, Send, Trash2, TriangleAlert, X } from "lucide-react";
 import { Badge, Button, Select, Spinner, Textarea } from "../../../components/ui";
+import { SkillPicker } from "../../../components/SkillPicker";
 import { useApi } from "../../../lib/apiClient";
 import { useLlmRun } from "../../../lib/hooks";
 import type { ScriptChatMessage, ScriptChatSession } from "../../../lib/types";
@@ -87,6 +88,9 @@ export function ChatDock(p: Props) {
   const [open, setOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  // 挂给这一轮对话的技能（技能库里的 id）。整段会话共用一份：改稿是连续动作，
+  // 每条消息重挑一次只会让人挑到第 3 条就忘了自己勾过什么
+  const [skillIds, setSkillIds] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [attaching, setAttaching] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -143,7 +147,7 @@ export function ChatDock(p: Props) {
     const baseChars = p.script.length;
     const history = session.messages.map((m) => ({ role: m.role, content: m.text }));
     try {
-      const res = await llmRun.mutateAsync({ purpose: "script_chat", input: ask, opts: { backendId: p.backendId, messages: history, script: p.script } });
+      const res = await llmRun.mutateAsync({ purpose: "script_chat", input: ask, opts: { backendId: p.backendId, messages: history, script: p.script, skillIds } });
       const d = (res.data ?? {}) as { reply?: unknown; scriptText?: unknown };
       const body = String(d.scriptText ?? "");
       const answer: ScriptChatMessage = {
@@ -215,7 +219,7 @@ export function ChatDock(p: Props) {
         title={p.blocked ?? (sending ? "助手正在整篇重出这份稿子" : "和助手对话改这份剧本")}
         inert={open}
         className={cn(
-          "fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full border border-rule bg-panel/95 px-4 py-2.5 text-note text-ink shadow-[0_10px_30px_rgba(0,0,0,.5)]",
+          "fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full border border-rule bg-panel/95 px-4 py-2.5 text-note text-ink shadow-pop",
           "origin-bottom-right transition-[opacity,transform,border-color] duration-300 ease-glide",
           "hover:-translate-y-px hover:border-chrome/45 active:scale-[0.97]",
           open && "pointer-events-none translate-y-2 scale-[0.9] opacity-0",
@@ -223,7 +227,7 @@ export function ChatDock(p: Props) {
       >
         {sending ? <PixelGrid className="text-chrome" /> : <MessageSquareText className="h-4 w-4 flex-none text-chrome" />}
         {sending ? "助手在改稿" : "对话改稿"}
-        {pending > 0 && <span className="anim-pop-in rounded-full bg-state-fail px-1.5 text-micro text-slate">{pending} 待确认</span>}
+        {pending > 0 && <span className="anim-pop-in rounded-full bg-state-fail px-1.5 text-caption text-slate">{pending} 待确认</span>}
       </button>
 
       <section
@@ -241,7 +245,7 @@ export function ChatDock(p: Props) {
           void attach(e.dataTransfer?.files?.[0]);
         }}
         className={cn(
-          "fixed bottom-6 right-6 z-40 flex h-[min(72vh,640px)] w-[min(520px,calc(100vw-3rem))] flex-col overflow-hidden rounded-panel border bg-panel shadow-[0_22px_60px_rgba(0,0,0,.6)]",
+          "fixed bottom-6 right-6 z-40 flex h-[min(72vh,640px)] w-[min(520px,calc(100vw-3rem))] flex-col overflow-hidden rounded-panel border bg-panel shadow-sheet",
           "origin-bottom-right transition-[opacity,transform,border-color] duration-400 ease-glide",
           dragOver ? "border-chrome" : "border-rule",
           !open && "pointer-events-none translate-y-3 scale-[0.97] opacity-0",
@@ -330,6 +334,8 @@ export function ChatDock(p: Props) {
         )}
 
         <footer className="flex-none space-y-1.5 border-t border-rule-soft px-3 py-2">
+          {/* 输入框上方的技能库：勾中的写法要求跟着这一轮的指令一起进模型 */}
+          <SkillPicker stage="script" value={skillIds} onChange={setSkillIds} disabled={sending || !!p.blocked} label="技能库" />
           <Textarea
             rows={3}
             className="w-full"
@@ -375,7 +381,7 @@ export function ChatDock(p: Props) {
               发送
             </Button>
           </div>
-          <p className="text-micro leading-tight text-ink-mute">
+          <p className="text-caption leading-snug text-ink-mute">
             能读：{ACCEPT.split(",").join(" ")}。也可以直接把文件拖进这个面板；读进来只出提案，点确认才换掉正文。
           </p>
         </footer>
@@ -425,7 +431,7 @@ function Bubble({
         </div>
       ) : (
         <div className={isUser ? "rounded-tile border border-rule bg-raised px-2.5 py-1.5" : "rounded-tile border border-rule-soft bg-sheen px-2.5 py-1.5"}>
-          <span className="label-mono mb-0.5 flex items-center gap-1 text-micro text-ink-mute">
+          <span className="label-mono mb-0.5 flex items-center gap-1 text-caption text-ink-mute">
             {up && <FileUp className="h-2.5 w-2.5" />}
             {new Date(msg.ts).toLocaleTimeString()}
             {msg.latencyMs ? ` · ${(msg.latencyMs / 1000).toFixed(0)} 秒` : ""}
@@ -463,7 +469,7 @@ function Bubble({
         >
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-note font-semibold text-ink">{up ? "换稿待确认" : "改稿待确认"}</span>
-            <span className="mono text-micro text-ink-mute">
+            <span className="mono text-caption text-ink-mute">
               {up ? `${up.format} · ${nf(up.chars)} 字 · ${nf(up.lines)} 行${up.encoding ? ` · ${up.encoding}` : ""}` : `${nf(script.length)} 字 → ${nf(candidate.length)} 字`}
             </span>
             {msg.outcome === "applied" ? (
@@ -506,7 +512,7 @@ function Diff({ script, next }: { script: string; next: string }) {
   const changed = shown.filter((l) => l.t !== "same").length;
   return (
     <div className="mt-2 max-h-[280px] overflow-y-auto rounded-ctl border border-rule bg-inset p-2">
-      <p className="label-mono mb-1 text-micro text-ink-mute">
+      <p className="label-mono mb-1 text-caption text-ink-mute">
         逐行对比（当前正文 ↔ 改稿）· 显示 {changed} 处{hidden > 0 ? `，还有 ${hidden} 处未展开` : ""}
       </p>
       <pre className="whitespace-pre-wrap break-words font-mono text-caption leading-[1.7]">

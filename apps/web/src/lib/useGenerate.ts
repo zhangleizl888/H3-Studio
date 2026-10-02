@@ -246,6 +246,22 @@ export function useGenerator(projectId: string | undefined) {
   return { run, runBatch, handles, busy, reconcileFromServer, roleFor };
 }
 
+/**
+ * 任何要看产物的页面都先收口一次。
+ * 成片已经落库、镜头还停在 queued 时，导出页会直接说「还没有任何一段成片」——
+ * 只有导演台/资产页会 reconcile，所以刷新一下到导出页就看不到刚出的片。
+ * 幂等靠 ref：StrictMode 会把 effect 挂两次，两次都进 reconcile 会给同一个 job 起两个轮询。
+ */
+export function useProjectReconcile(project: Project | undefined) {
+  const { reconcileFromServer } = useGenerator(project?.id);
+  const done = useRef<string | null>(null);
+  useEffect(() => {
+    if (!project || done.current === project.id) return;
+    done.current = project.id;
+    void reconcileFromServer(project).catch(() => undefined);
+  }, [project, reconcileFromServer]);
+}
+
 /** 从任务的 title/meta 反推它属于哪个对象，用来接回刷新前提交的任务 */
 function targetFromJob(job: Job, project: Project): GenTarget | null {
   const title = job.title ?? "";

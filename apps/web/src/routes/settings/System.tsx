@@ -12,39 +12,59 @@ import {
   Wrench,
 } from "lucide-react";
 import { Badge, Button, Copyable, Field, Input, KeyVal, Modal, Panel, StateGlyph, Toggle } from "../../components/ui";
-import { useStorage } from "../../lib/hooks";
+import { useAuditTrail, useInstances, useSavePaths, useStorage, useSystemPaths, useSystemBackup } from "../../lib/hooks";
 import { useApi } from "../../lib/apiClient";
 import { cn, fmtBytes, fmtTime } from "../../lib/utils";
 
 const GB = 1024 ** 3;
 
-const PATH_KEY = "h3studio.paths";
-const PATH_DEFAULT = {
-  media: "D:/h3studio/data/media",
-  tmp: "D:/h3studio/data/tmp",
-  ffmpeg: "D:/h3studio/tools/ffmpeg.exe",
-  comfyOutput: "D:/ComfyUI/output",
+type PathKey = "media" | "tmp" | "comfyOutput" | "ffmpeg";
+type Paths = Record<PathKey, string>;
+
+/** 后端记的是动作码（job.retry 这种），界面上给中文；认不出的原样显示，别编一个好看的假名字 */
+const AUDIT_LABEL: Record<string, string> = {
+  "auth.login": "登录",
+  "auth.login_failed": "登录失败",
+  "auth.bootstrap": "建首个账号",
+  "job.dispatch": "开始派发",
+  "job.retry": "重试任务",
+  "job.cancel": "取消任务",
+  "script.version.create": "存剧本版本",
+  "script.version.current": "剧本设为当前版",
+  "script.version.trash": "剧本版进回收站",
+  "script.version.restore": "剧本版恢复",
+  "script.version.purge": "剧本版彻底删除",
+  "trash.media": "产物进回收站",
+  "trash.restore": "从回收站恢复",
+  "trash.project": "项目进回收站",
+  "trash.gc": "手动回收",
+  "trash.purge_expired": "回收站到期清理",
+  "trash.purge_row": "单条彻底删除",
+  "user.create": "建用户",
+  "user.update": "改用户",
+  "user.delete": "删用户",
+  "system.paths": "目录设置变更",
 };
-type PathKey = keyof typeof PATH_DEFAULT;
-type Paths = typeof PATH_DEFAULT;
 
-const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
-
-/** 只读示例列表，按新到旧。密钥一律是 abcd****wxyz 这种形状，界面里不出现可用密钥 */
-const AUDIT: { ts: string; actor: string; action: string; target: string; detail: string }[] = [
-  { ts: hoursAgo(0.3), actor: "张雷", action: "停用用户", target: "chenh", detail: "离职交接，他的任务与媒体记录都留着" },
-  { ts: hoursAgo(1.2), actor: "system", action: "实例配置变更", target: "inst_rh_task", detail: "并发上限 4 改为 3；apiKey 变更为 /proxy/abcd****wxyz" },
-  { ts: hoursAgo(3), actor: "李昱", action: "派发任务", target: "p_1 / 镜 018", detail: "fl2v · 121 帧 · 8 步 Turbo" },
-  { ts: hoursAgo(9), actor: "张雷", action: "媒体回收预演", target: "data/tmp", detail: "报告 3.4 GB 可回收，未实际删除" },
-  { ts: hoursAgo(26), actor: "王奇", action: "导出", target: "p_1", detail: "整片合成，-c copy 命中，没回退重编码" },
-  { ts: hoursAgo(30), actor: "张雷", action: "登录失败", target: "zhous", detail: "密码不对，第 2 次；5 次后锁 10 分钟" },
-  { ts: hoursAgo(52), actor: "张雷", action: "项目移入回收站", target: "p_short", detail: "满 100 天后文件才走，到期前可在生成回收站恢复" },
-];
+/** 详情是后端塞的 jsonb：挑几个真有信息量的键说人话，剩下的收成「另 n 项」 */
+function auditDetail(d: Record<string, unknown> | null | undefined): string {
+  if (!d || !Object.keys(d).length) return "—";
+  const parts: string[] = [];
+  for (const key of ["message", "reason", "title", "kind", "state", "version", "promoted", "deleted", "bytes", "dryRun"]) {
+    if (d[key] !== undefined && d[key] !== null && d[key] !== "") parts.push(`${key}=${String(d[key])}`);
+  }
+  const rest = Object.keys(d).length - parts.length;
+  if (!parts.length) return Object.keys(d).slice(0, 4).join("、");
+  return rest > 0 ? `${parts.join(" · ")} · 另 ${rest} 项` : parts.join(" · ");
+}
 
 export default function System() {
   const { data: st, error: stError } = useStorage();
   const api = useApi();
-  const paths = useLocalPaths();
+  const paths = useServerPaths();
+  const { data: serverPaths } = useSystemPaths();
+  const { data: audit, isLoading: auditLoading, error: auditError } = useAuditTrail();
+  const { data: backup, error: backupError } = useSystemBackup();
   const [dryRun, setDryRun] = useState(true);
   const [report, setReport] = useState<{ dry: boolean; reclaimableBytes: number; orphans: number } | null>(null);
   const [gcBusy, setGcBusy] = useState(false);
@@ -128,7 +148,7 @@ export default function System() {
                 items={[
                   ["文件数", <span className="mono">{st.mediaCount}</span>],
                   ["有产物的项目", <span className="mono">{st.byProject.length}</span>],
-                  ["媒体目录", <span className="mono truncate">{paths.value.media}</span>],
+                  ["媒体目录", <span className="mono truncate">{serverPaths?.media.path ?? st?.root ?? "—"}</span>],
                 ]}
               />
             </div>
@@ -286,7 +306,7 @@ export default function System() {
                 value={paths.value.media}
                 onChange={(e) => paths.set("media", e.target.value)}
                 className="mono w-full"
-                placeholder={PATH_DEFAULT.media}
+                placeholder="留空 = 用后端默认那一份"
               />
             </Field>
             <Field label="临时目录" hint="重试留下的中间帧和切片都在这里，回收主要清这一处。">
@@ -296,18 +316,21 @@ export default function System() {
                   value={paths.value.tmp}
                   onChange={(e) => paths.set("tmp", e.target.value)}
                   className="mono flex-1"
-                  placeholder={PATH_DEFAULT.tmp}
+                  placeholder="留空 = 用后端默认那一份"
                 />
               </span>
             </Field>
-            <Field label="ComfyUI output 目录" hint="本机实例直读盘，省一次下载。">
+            <Field
+              label="ComfyUI output 目录"
+              hint={`本机实例直读盘，省一次下载。这一格的真源在「设置 → 生成实例」的 ${paths.comfySource} 上，这里只读。`}
+            >
               <span className="flex items-center gap-1.5">
                 <FolderOutput className="h-3.5 w-3.5 flex-none text-ink-mute" />
                 <Input
                   value={paths.value.comfyOutput}
-                  onChange={(e) => paths.set("comfyOutput", e.target.value)}
-                  className="mono flex-1"
-                  placeholder={PATH_DEFAULT.comfyOutput}
+                  readOnly
+                  title="改它请去「设置 → 生成实例」"
+                  className="mono flex-1 text-ink-mute"
                 />
               </span>
             </Field>
@@ -318,7 +341,7 @@ export default function System() {
                   value={paths.value.ffmpeg}
                   onChange={(e) => paths.set("ffmpeg", e.target.value)}
                   className="mono flex-1"
-                  placeholder={PATH_DEFAULT.ffmpeg}
+                  placeholder="留空 = 用后端默认那一份"
                 />
               </span>
             </Field>
@@ -328,12 +351,19 @@ export default function System() {
             <Button size="sm" variant="primary" disabled={!paths.dirty} onClick={paths.save}>
               保存目录设置
             </Button>
-            {paths.dirty ? (
+            {paths.error ? (
+              <span className="text-caption text-state-fail">{paths.error}</span>
+            ) : paths.dirty ? (
               <span className="text-caption text-ink-mute">改动还没存。</span>
             ) : paths.savedAt ? (
-              <span className="text-caption text-ink-mute">已存到本机（{fmtTime(paths.savedAt)}）。</span>
+              <span className="text-caption text-ink-mute">
+                已存到后端（{fmtTime(paths.savedAt)}）。
+                {paths.needsRestart.length
+                  ? `其中 ${paths.needsRestart.join("、")} 要重启后端才换 —— 旧产物的路径是相对这两个根目录存的，运行中改会让它们指错。`
+                  : "ffmpeg 下一次导出就用新值。"}
+              </span>
             ) : (
-              <span className="text-caption text-ink-mute">还是默认目录。</span>
+              <span className="text-caption text-ink-mute">上面显示的是后端此刻真正在用的路径。</span>
             )}
             {(paths.dirty || paths.savedAt) && (
               <Button size="sm" variant="quiet" onClick={paths.reset}>
@@ -376,8 +406,30 @@ export default function System() {
               </tr>
             </thead>
             <tbody>
-              {AUDIT.map((a) => (
-                <tr key={a.ts + a.action} className="border-b border-rule-soft align-top">
+              {auditLoading && (
+                <tr>
+                  <td colSpan={5} className="px-2 py-3 text-note text-ink-mute">
+                    正在读审计表…
+                  </td>
+                </tr>
+              )}
+              {auditError && (
+                <tr>
+                  <td colSpan={5} className="px-2 py-3 text-note text-state-fail">
+                    读不到操作记录：{String((auditError as Error).message || auditError)}
+                  </td>
+                </tr>
+              )}
+              {audit && audit.items.length === 0 && !auditLoading && (
+                <tr>
+                  <td colSpan={5} className="px-2 py-3 text-note text-ink-mute">
+                    还没有记到任何操作。这里记的是配置变更、派发与重试、目录设置、回收与登录 ——
+                    没发生过的事不该出现在这张表上。
+                  </td>
+                </tr>
+              )}
+              {audit?.items.map((a, i) => (
+                <tr key={`${a.ts}-${a.action}-${i}`} className="border-b border-rule-soft align-top">
                   <td className="mono px-2 py-1.5 whitespace-nowrap text-note text-ink-mute">{fmtTime(a.ts)}</td>
                   <td className="px-2 py-1.5 whitespace-nowrap">
                     {a.actor === "system" ? (
@@ -387,17 +439,18 @@ export default function System() {
                     )}
                   </td>
                   <td className="px-2 py-1.5 whitespace-nowrap">
-                    <Badge>{a.action}</Badge>
+                    <Badge>{AUDIT_LABEL[a.action] ?? a.action}</Badge>
                   </td>
                   <td className="mono px-2 py-1.5 text-note text-ink-dim">{a.target}</td>
-                  <td className="px-2 py-1.5 text-note leading-snug text-ink-mute">{a.detail}</td>
+                  <td className="px-2 py-1.5 text-note leading-snug text-ink-mute">{auditDetail(a.detail)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <p className="px-3 py-2 text-caption leading-snug text-ink-mute">
-          这份列表是原型的示例数据，后端审计接口接进来之前别当依据用。
+          这张表读的是后端 `audit_log`（{audit ? `${audit.items.length} / ${audit.total} 条` : "读取中…"}）。
+          只记后端真做过的动作：登录与登录失败、派发/重试/取消、版本与回收站、用户与目录设置。
           实例地址返回给前端时 key 已经脱敏，前端再兜一次 —— 原始密钥不进浏览器包、不进日志、不进报错栈。
         </p>
       </Panel>
@@ -410,33 +463,38 @@ export default function System() {
             备份
           </span>
         }
-        actions={<span className="text-caption text-ink-mute">本机只有一个 PostgreSQL 容器</span>}
+        actions={<span className="text-caption text-ink-mute">{backup?.database ?? "读不到连接串"}</span>}
       >
-        <ul className="space-y-2.5">
-          <li className="space-y-1">
-            <div className="text-note text-ink-dim">导数据库（自定义格式，能挑表恢复）</div>
-            <Copyable
-              text="docker exec -t h3studio-db pg_dump -U h3 -d h3studio -Fc -f /tmp/h3studio-$(date +%F).backup"
-              className="block rounded-panel bg-inset px-2 py-1 text-note text-ink-dim"
-            />
-          </li>
-          <li className="space-y-1">
-            <div className="text-note text-ink-dim">把 dump 从容器里取到本机</div>
-            <Copyable
-              text="docker cp h3studio-db:/tmp/h3studio-$(date +%F).backup ./backup/"
-              className="block rounded-panel bg-inset px-2 py-1 text-note text-ink-dim"
-            />
-          </li>
-          <li className="space-y-1">
-            <div className="text-note text-ink-dim">恢复</div>
-            <Copyable
-              text="docker exec -i h3studio-db pg_restore -U h3 -d h3studio --clean --if-exists < ./backup/h3studio-$(date +%F).backup"
-              className="block rounded-panel bg-inset px-2 py-1 text-note text-ink-dim"
-            />
-          </li>
-        </ul>
+        {backupError && (
+          <p className="px-3 py-2 text-note text-state-fail">读备份命令失败：{String((backupError as Error).message || backupError)}</p>
+        )}
+        {backup && !backup.available && (
+          <p className="px-3 py-2 text-note leading-snug text-ink-mute">{backup.note}</p>
+        )}
+        {backup?.available && (
+          <>
+            <ul className="space-y-2.5">
+              <li className="space-y-1">
+                <div className="text-note text-ink-dim">导数据库（自定义格式，能挑表恢复）</div>
+                <Copyable text={backup.dump} className="block rounded-panel bg-inset px-2 py-1 text-note text-ink-dim" />
+              </li>
+              <li className="space-y-1">
+                <div className="text-note text-ink-dim">检查 dump 里都有什么</div>
+                <Copyable text={backup.list} className="block rounded-panel bg-inset px-2 py-1 text-note text-ink-dim" />
+              </li>
+              <li className="space-y-1">
+                <div className="text-note text-ink-dim">恢复（--clean --if-exists，库不存在时才需要先建）</div>
+                <Copyable text={backup.restore} className="block rounded-panel bg-inset px-2 py-1 text-note text-ink-dim" />
+              </li>
+            </ul>
+            <p className="mt-2 text-caption leading-snug text-ink-mute">
+              这三条是后端按<b>当前真实连接串</b>拼的：内嵌 pgserver 的端口每次启动都会变，写死端口的命令第二天就作废。
+              pg_dump 用的是 {backup.pgDump}。
+            </p>
+          </>
+        )}
         <p className="mt-2 text-caption leading-snug text-ink-mute">
-          备份是两条腿：dump 管剧本、分镜、任务与用户，媒体目录归文件系统快照管 —— dump 里不含视频。
+          备份是两条腿：dump 管用户、任务、媒体索引、剧本版本与工作流，媒体文件本身归文件系统快照管 —— dump 里不含视频。
           备份别和媒体目录放同一块盘，那块盘写满了两边一起没。
         </p>
       </Panel>
@@ -500,50 +558,43 @@ function ConfirmGcModal({
 }
 
 /** 后端还没读这些路径，先把配置留在本机，别让填过的东西丢 */
-function useLocalPaths() {
-  const [value, setValue] = useState<Paths>(() => {
-    try {
-      const raw = localStorage.getItem(PATH_KEY);
-      return raw ? { ...PATH_DEFAULT, ...(JSON.parse(raw) as Partial<Paths>) } : PATH_DEFAULT;
-    } catch {
-      return PATH_DEFAULT;
-    }
-  });
-  const [savedAt, setSavedAt] = useState<string | null>(() => {
-    try {
-      const raw = localStorage.getItem(PATH_KEY);
-      const p = raw ? (JSON.parse(raw) as { savedAt?: string }) : null;
-      return p?.savedAt ?? null;
-    } catch {
-      return null;
-    }
-  });
-
-  const dirty = (() => {
-    try {
-      const raw = localStorage.getItem(PATH_KEY);
-      if (!raw) return JSON.stringify(value) !== JSON.stringify(PATH_DEFAULT);
-      const stored = JSON.parse(raw) as Partial<Paths>;
-      return (Object.keys(PATH_DEFAULT) as PathKey[]).some((k) => stored[k] !== value[k]);
-    } catch {
-      return true;
-    }
-  })();
-
+/**
+ * 目录设置表单：初值一律来自后端「现在真正生效的那一份」（/api/system/paths）。
+ * 以前这个 hook 读的是 localStorage + 一组 D:/h3studio/... 常量，于是页面显示的媒体目录
+ * 和后端实际写的目录可以完全无关 —— 照着页面去备份会备到一个空目录。
+ * ComfyUI output 不归这份设置管（它是「生成实例」上的一条配置），所以那一格只读。
+ */
+function useServerPaths() {
+  const { data: sp } = useSystemPaths();
+  const { data: instances } = useInstances();
+  const mut = useSavePaths();
+  const [edited, setEdited] = useState<Partial<Paths>>({});
+  const local = (instances ?? []).find((i) => i.placement === "local");
+  const value: Paths = {
+    media: edited.media ?? sp?.media.path ?? "",
+    tmp: edited.tmp ?? sp?.tmp.path ?? "",
+    comfyOutput: local?.localOutputRoot ?? "这台实例没配直读目录（产物走下载）",
+    ffmpeg: edited.ffmpeg ?? sp?.ffmpeg.path ?? "",
+  };
+  const dirty = Object.keys(edited).length > 0;
+  const restart = mut.data?.needsRestart ?? sp?.needsRestart ?? [];
   return {
     value,
     dirty,
-    savedAt,
-    set: (k: PathKey, v: string) => setValue((prev) => ({ ...prev, [k]: v })),
+    comfySource: local ? `${local.name}${local.placement === "local" ? " · 本机实例" : ""}` : "（没有本机实例）",
+    ffmpegSource: sp?.ffmpeg.source ?? "—",
+    needsRestart: restart,
+    savedAt: mut.isSuccess ? new Date().toISOString() : null,
+    error: mut.error ? String((mut.error as Error).message || mut.error) : null,
+    busy: mut.isPending,
+    set: (k: PathKey, v: string) => setEdited((prev) => ({ ...prev, [k]: v })),
     save: () => {
-      const ts = new Date().toISOString();
-      localStorage.setItem(PATH_KEY, JSON.stringify({ ...value, savedAt: ts }));
-      setSavedAt(ts);
+      mut.mutate({ media: value.media.trim() || null, tmp: value.tmp.trim() || null, ffmpeg: value.ffmpeg.trim() || null });
+      setEdited({});
     },
     reset: () => {
-      localStorage.removeItem(PATH_KEY);
-      setValue(PATH_DEFAULT);
-      setSavedAt(null);
+      mut.mutate({ media: null, tmp: null, ffmpeg: null });
+      setEdited({});
     },
   };
 }

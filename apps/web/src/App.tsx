@@ -9,10 +9,10 @@ import Director from "./routes/project/Director";
 import ProjectQueue from "./routes/project/Queue";
 import Export from "./routes/project/Export";
 import Prompts from "./routes/project/Prompts";
-import Workflows from "./routes/Workflows";
+import Skills from "./routes/Skills";
 import History from "./routes/History";
 import Trash from "./routes/Trash";
-import Instances from "./routes/settings/Instances";
+import ServersWorkflows from "./routes/settings/ServersWorkflows";
 import Llm from "./routes/settings/Llm";
 import Users from "./routes/settings/Users";
 import System from "./routes/settings/System";
@@ -69,11 +69,13 @@ export default function App() {
             <Route path="/p/:id/queue" element={<ProjectQueue />} />
             <Route path="/p/:id/prompts" element={<Prompts />} />
             <Route path="/p/:id/export" element={<Export />} />
-            <Route path="/workflows" element={<Workflows />} />
+            {/* 工作流库已经并进「设置 · 工作流管理」：这里只留一条跳转，别让老书签 404 */}
+            <Route path="/workflows" element={<Navigate to="/settings/gen?tab=workflows" replace />} />
+            <Route path="/skills" element={<Skills />} />
             <Route path="/history" element={<History />} />
             <Route path="/trash" element={<Trash />} />
             <Route path="/settings" element={<Navigate to="/settings/gen" replace />} />
-            <Route path="/settings/gen" element={<Instances />} />
+            <Route path="/settings/gen" element={<ServersWorkflows />} />
             <Route path="/settings/llm" element={<Llm />} />
             <Route path="/settings/users" element={<Users />} />
             <Route path="/settings/system" element={<System />} />

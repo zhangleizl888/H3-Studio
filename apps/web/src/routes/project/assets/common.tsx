@@ -74,7 +74,7 @@ export function MediaImage({
   const overlay = (
     <>
       {busy && (
-        <div className="absolute inset-0 grid place-items-center bg-void/70 backdrop-blur-[2px]">
+        <div className="absolute inset-0 grid place-items-center bg-scrim/70 backdrop-blur-[2px]">
           <div className="flex flex-col items-center gap-1.5">
             <Spinner className="h-5 w-5 text-chrome" />
             <span className="label-mono">生成中</span>
@@ -101,7 +101,7 @@ export function MediaImage({
   }
 
   return (
-    <div className={cn("relative overflow-hidden rounded-panel border border-hairline bg-void/70", className)} style={{ aspectRatio: aspect }}>
+    <div className={cn("relative overflow-hidden rounded-panel border border-hairline bg-scrim/70", className)} style={{ aspectRatio: aspect }}>
       <img src={src} alt={alt} loading="lazy" className="h-full w-full object-cover" />
       {overlay}
       {onClick && <button type="button" onClick={onClick} aria-label={`放大查看 ${alt}`} className="absolute inset-0 cursor-zoom-in" />}
@@ -154,7 +154,7 @@ export function GenBar({ handle }: { handle?: GenHandle }) {
       >
         {pct !== null && (
           <div
-            className="h-full transition-[width] duration-500"
+            className="h-full transition-[width] duration-400"
             style={{ width: `${pct}%`, background: failed ? "var(--color-state-fail)" : "linear-gradient(90deg, var(--color-chrome), var(--color-chrome-2))" }}
           />
         )}
@@ -213,6 +213,7 @@ export function UploadButton({
   className,
   disabled,
   title,
+  accept = "image/*",
 }: {
   onFile: (file: File) => Promise<void> | void;
   label?: string;
@@ -220,13 +221,15 @@ export function UploadButton({
   className?: string;
   disabled?: boolean;
   title?: string;
+  /** 默认收图；音色那条要收音频 */
+  accept?: string;
 }) {
   const [busy, setBusy] = useState(false);
   return (
     <label className={cn(actionClass(tone, className), (disabled || busy) && "cursor-not-allowed opacity-45")} title={title ?? "选一张本地参考图，直接作为该对象的产物"}>
       <input
         type="file"
-        accept="image/*"
+        accept={accept}
         className="sr-only"
         disabled={disabled || busy}
         onChange={async (e) => {
@@ -297,7 +300,7 @@ export function InlineEdit({
             setEditing(false);
           }
         }}
-        className={cn("w-full min-w-0 rounded-ctl border border-chrome/40 bg-void/60 px-1.5 py-0.5 text-inherit", inputClassName, className)}
+        className={cn("w-full min-w-0 rounded-ctl border border-chrome/40 bg-inset px-1.5 py-0.5 text-inherit", inputClassName, className)}
       />
     );
   }
@@ -408,7 +411,7 @@ export function Sheet({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-void/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim/80 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -427,7 +430,7 @@ export function Sheet({
             {eyebrow && <div className="label-mono mb-0.5">{eyebrow}</div>}
             <h2 className="truncate text-subtitle font-semibold">{title}</h2>
           </div>
-          <button onClick={onClose} aria-label="关闭" className="flex-none rounded-ctl p-1.5 text-ink-mute transition-colors hover:bg-hairline hover:text-ink">
+          <button type="button" onClick={onClose} aria-label="关闭" className="flex-none rounded-ctl p-1.5 text-ink-mute transition-colors hover:bg-hairline hover:text-ink">
             <X className="h-4 w-4" />
           </button>
         </header>

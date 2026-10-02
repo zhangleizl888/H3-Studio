@@ -10,6 +10,7 @@ import {
   ScrollText,
   Settings2,
   Film,
+  Sparkles,
   Sun,
   Cpu,
   ListChecks,
@@ -17,10 +18,13 @@ import {
   Waypoints,
   History,
   Trash2,
+  KeyRound,
 } from "lucide-react";
 import { Button, MachChip, Spinner } from "../ui";
 import { SplitHandle, usePane } from "../SplitPane";
+import ChangePasswordModal from "../ChangePasswordModal";
 import ModelConfigModal from "../ModelConfigModal";
+import { FirstRunWizard } from "../FirstRunWizard";
 import { useInstances, useJobs, useProjects } from "../../lib/hooks";
 import { useApp } from "../../state/app";
 import { useApi } from "../../lib/apiClient";
@@ -37,10 +41,11 @@ const STAGES = [
 
 export function AppShell() {
   const { id } = useParams();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const { data: projects } = useProjects();
   const { navCollapsed, setNavCollapsed, theme, toggleTheme, user, setUser } = useApp();
   const [modelConfig, setModelConfig] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
   const navPane = usePane("shell.nav", 236, 200, 460);
   // 拖动期间必须关掉 transition-[width]，否则栏宽会黏在指针后面慢半拍
   const [navDragging, setNavDragging] = useState(false);
@@ -83,10 +88,23 @@ export function AppShell() {
             ))}
           {project && !navCollapsed && <div className="my-1 border-t border-hairline" />}
           <SideLink to="/" label="仪表盘" icon={Film} collapsed={navCollapsed} active={pathname === "/"} />
-          <SideLink to="/workflows" label="工作流库" icon={ScrollText} collapsed={navCollapsed} />
+          <SideLink
+            to="/settings/gen?tab=workflows"
+            label="工作流库"
+            icon={ScrollText}
+            collapsed={navCollapsed}
+            active={pathname.startsWith("/settings") && search.includes("tab=workflows")}
+          />
+          <SideLink to="/skills" label="技能库" icon={Sparkles} collapsed={navCollapsed} />
           <SideLink to="/history" label="生成历史" icon={History} collapsed={navCollapsed} active={pathname.startsWith("/history")} />
           <SideLink to="/trash" label="生成回收站" icon={Trash2} collapsed={navCollapsed} active={pathname.startsWith("/trash")} />
-          <SideLink to="/settings/gen" label="设置" icon={Settings2} collapsed={navCollapsed} active={pathname.startsWith("/settings")} />
+          <SideLink
+            to="/settings/gen"
+            label="设置"
+            icon={Settings2}
+            collapsed={navCollapsed}
+            active={pathname.startsWith("/settings") && !search.includes("tab=workflows")}
+          />
           <button
             onClick={() => setModelConfig(true)}
             type="button"
@@ -101,7 +119,7 @@ export function AppShell() {
           </button>
         </nav>
 
-        <div className="mt-auto flex flex-col gap-1 border-t border-hairline p-3">
+        <div className="mt-auto flex flex-col gap-2 border-t border-hairline p-3">
           <button
             onClick={() => setNavCollapsed(!navCollapsed)}
             type="button"
@@ -120,6 +138,16 @@ export function AppShell() {
           >
             {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
             {!navCollapsed && (theme === "dark" ? "浅色" : "深色")}
+          </button>
+          <button
+            onClick={() => setPwOpen(true)}
+            type="button"
+            aria-label="修改登录口令"
+            className={cn("flex items-center gap-2 rounded-ctl px-2 py-1.5 text-note text-ink-mute hover:bg-sheen hover:text-ink", navCollapsed && "justify-center")}
+            title="修改登录口令"
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+            {!navCollapsed && "改密"}
           </button>
           <button
             onClick={async () => {
@@ -145,6 +173,8 @@ export function AppShell() {
         </main>
       </div>
       <ModelConfigModal open={modelConfig} onClose={() => setModelConfig(false)} projectId={id} />
+      {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+      <FirstRunWizard />
     </div>
   );
 }

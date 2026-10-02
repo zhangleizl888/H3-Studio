@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Badge,
@@ -7,28 +7,27 @@ import {
   Empty,
   Field,
   Input,
-  KeyVal,
   MachChip,
-  Modal,
   Panel,
   Progress,
   Select,
   StateLabel,
   Tabs,
-  Textarea,
-  Toggle,
-} from "../components/ui";
+} from "./ui";
 import { RH_ERROR_HINTS } from "../lib/constants";
 import { useApi } from "../lib/apiClient";
-import { useInstances, useJobMutations, useJobs, useWorkflow, useWorkflowMutations, useWorkflows } from "../lib/hooks";
-import type { GenInstance, ImportReport, Job, NodeOverride, Workflow, WorkflowFamily, WorkflowSlot } from "../lib/types";
+import { useJobMutations, useJobs, useWorkflowMutations } from "../lib/hooks";
+import type { GenInstance, Job, NodeOverride, Workflow, WorkflowFamily, WorkflowSlot } from "../lib/types";
 import { cn, fmtMoney, fmtTime } from "../lib/utils";
-import { SplitHandle, usePane } from "../components/SplitPane";
 
-/**
- * /workflows —— 工作流库。
- * 一份槽位定义喂两种执行后端：comfy_native 用 patch 后的 API 图，
- * rh_task 用 nodeInfoList 投影。这一页把两个形状都摊开给人看。
+/*
+ * 一条工作流的详情面板：槽位、任务信号与本机改写、试运行、RunningHub 投影、导出。
+ *
+ * 它原来独占 /workflows 一个页面，和「设置 · 工作流管理」那套卡片是同一个库的两副面孔 ——
+ * 改一次权重要在两处之间跳。现在合并成一处：卡片上点名字就地展开这块。
+ *
+ * 一份槽位定义喂两种执行后端：comfy_native 用 patch 后的 API 图，rh_task 用 nodeInfoList 投影，
+ * 所以这里把两个形状都摊开给人看，而不是只给一个"看起来对"的。
  */
 
 type TabKey = "slots" | "adapt" | "test" | "rh" | "export";
@@ -41,189 +40,10 @@ const FAMILY_LABEL: Record<WorkflowFamily, string> = {
   custom: "自定义",
 };
 
-export default function Workflows() {
-  const pane = usePane("workflows.list", 290, 220, 520);
-  const { data: list, error: listErr } = useWorkflows();
-  const [picked, setPicked] = useState<string | null>(null);
-  const wfId = picked ?? list?.[0]?.id ?? null;
-  const { data: wf } = useWorkflow(wfId);
-  const { data: instances } = useInstances();
+export default function WorkflowInspector({ wf, instances }: { wf: Workflow; instances: GenInstance[] }) {
   const nav = useNavigate();
-
-  const rhOnly = (wf?.requirements?.runninghubOnly?.length ?? 0) > 0;
-
-  return (
-    <div style={pane.style} className="grid gap-4 p-4 xl:grid-cols-[var(--pane-w)_minmax(0,1fr)]">
-      <div className="relative min-w-0">
-        <WorkflowList
-          items={list}
-          error={listErr?.message ?? null}
-          selected={wfId}
-          onSelect={setPicked}
-          instances={instances ?? []}
-        />
-        <SplitHandle pane={pane} side="left" label="工作流列表宽度" className="hidden xl:block" />
-      </div>
-
-      {!wf ? (
-        <Panel title="工作流">
-          {!list?.length ? (
-            <Empty title="库里还没有工作流" hint="内置的 H3 / Qwen 链要等后端播种；你可以先导入一份 API 格式或 UI 格式的 JSON。" />
-          ) : (
-            <div className="p-3 text-note text-ink-mute">正在读取这份工作流。</div>
-          )}
-        </Panel>
-      ) : (
-        <Inspector key={wf.id} wf={wf} instances={instances ?? []} rhOnly={rhOnly} onGoInstances={() => nav("/settings/gen")} />
-      )}
-    </div>
-  );
-}
-
-function WorkflowList({
-  items,
-  error,
-  selected,
-  onSelect,
-  instances,
-}: {
-  items: Workflow[] | undefined;
-  error: string | null;
-  selected: string | null;
-  onSelect: (id: string) => void;
-  instances: GenInstance[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<Workflow | null>(null);
-  const mut = useWorkflowMutations();
-
-  return (
-    <Panel
-      title={
-        <span className="flex items-center gap-2">
-          工作流库
-          {items && <Badge>{items.length}</Badge>}
-        </span>
-      }
-      actions={
-        <Button size="sm" variant="primary" onClick={() => setOpen(true)}>
-          导入
-        </Button>
-      }
-      dense
-      className="self-start"
-    >
-      {error ? (
-        <div className="px-3 py-6 text-center text-note text-state-fail">{error}</div>
-      ) : !items ? (
-        <div className="px-3 py-6 text-center text-note text-ink-mute">正在读取工作流列表。</div>
-      ) : items.length === 0 ? (
-        <div className="p-3">
-          <Empty title="列表是空的" hint="导入一份 .json，或者让后端把内置链播种进来。" />
-        </div>
-      ) : (
-        <ul className="divide-y divide-rule-soft">
-          {items.map((w) => {
-            const only = (w.requirements?.runninghubOnly?.length ?? 0) > 0;
-            return (
-              <li key={w.id}>
-                <button
-                  onClick={() => onSelect(w.id)}
-                  className={cn("block w-full space-y-1.5 px-3 py-2.5 text-left hover:bg-row-hover", selected === w.id && "bg-raised")}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-body font-semibold leading-tight">{w.name}</span>
-                    <span className="label flex-none">{FAMILY_LABEL[w.family]}</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1">
-                    <Badge>{w.isBuiltin ? "内置" : "导入"}</Badge>
-                    <Badge>{w.sourceFormat === "api" ? "API 格式" : "UI 格式"}</Badge>
-                    {(w.gaps?.length ?? 0) > 0 ? <Badge tone="warn">本机缺 {w.gaps!.length} 处</Badge> : <Badge tone="good">本机节点齐</Badge>}
-                    {w.verifiedAt && <Badge tone="good">真机跑通过</Badge>}
-                    {w.autoSelect === false && <Badge>不参与自动选</Badge>}
-                    {only && <Badge tone="warn">仅 RunningHub</Badge>}
-                    {w.tags.map((t) => (
-                      <span key={t} className="rounded-panel bg-slate px-1.5 py-[1px] text-caption text-ink-mute">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between gap-2 text-caption text-ink-mute">
-                    <span className="mono">
-                      {(w.signals?.length ?? 0) > 0 ? `吃 ${(w.signals ?? []).slice(0, 3).map((x) => x.label).join("/")}… · ` : ""}
-                      {w.nodeCount ? `${w.nodeCount} 节点 · ` : ""}
-                      {w.slots?.length ?? 0} 槽位
-                    </span>
-                    <span>{fmtTime(w.updatedAt)}</span>
-                  </div>
-                </button>
-                {!w.isBuiltin && selected === w.id && (
-                  <div className="px-3 pb-2">
-                    <Button size="sm" variant="quiet" onClick={() => setConfirmDelete(w)}>
-                      删除这份工作流
-                    </Button>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <ImportWizard
-        open={open}
-        onClose={() => setOpen(false)}
-        instances={instances}
-        onImported={(id) => {
-          setOpen(false);
-          onSelect(id);
-        }}
-      />
-
-      <Modal
-        open={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
-        title="删除工作流"
-        width={420}
-        footer={
-          <>
-            <Button variant="quiet" onClick={() => setConfirmDelete(null)}>
-              取消
-            </Button>
-            <Button
-              variant="danger"
-              loading={mut.remove.isPending}
-              onClick={() => {
-                if (!confirmDelete) return;
-                mut.remove.mutate(confirmDelete.id, {
-                  onSuccess: () => setConfirmDelete(null),
-                });
-              }}
-            >
-              确认删除
-            </Button>
-          </>
-        }
-      >
-        <p className="text-note leading-relaxed text-ink-dim">
-          只删这份工作流的定义与槽位，已产生的任务与媒体记录保留。历史任务里引用的 workflowId 会变成失效链接。
-        </p>
-      </Modal>
-    </Panel>
-  );
-}
-
-function Inspector({
-  wf,
-  instances,
-  rhOnly,
-  onGoInstances,
-}: {
-  wf: Workflow;
-  instances: GenInstance[];
-  rhOnly: boolean;
-  onGoInstances: () => void;
-}) {
+  // 「只能跑在 RunningHub 上」是从导入时报回来的专有节点判的，不是按实例名字猜的
+  const rhOnly = (wf.requirements?.runninghubOnly?.length ?? 0) > 0;
   const [tab, setTab] = useState<TabKey>("slots");
   /** 页内槽位值：只用来算 patch 预览与 nodeInfoList 投影，没有写回接口 */
   const [raws, setRaws] = useState<Record<string, string>>({});
@@ -283,7 +103,7 @@ function Inspector({
             <p className="text-note leading-snug text-ink-mute">
               图里有 RunningHub 专有节点：{wf.requirements?.runninghubOnly?.join("、")}。本机与自建云的 ComfyUI 装不到它们，
               所以下面所有实例选择器里，非 RunningHub 的选项都是灰的。{" "}
-              <button className="text-ink underline" onClick={onGoInstances}>
+              <button className="text-ink underline" onClick={() => nav("/settings/gen")}>
                 去检查 RunningHub 实例
               </button>
             </p>
@@ -391,8 +211,8 @@ function AdaptTab({ wf }: { wf: Workflow }) {
           <span className="label-mono">这台实例还缺</span>
           <ul className="space-y-1">
             {gaps.map((g, i) => (
-              <li key={`${g.node}-${g.class_type}-${i}`} className="rounded-panel border border-warn/40 bg-warn/5 p-2 text-note leading-snug">
-                <span className="mono text-caption text-warn">#{g.node}</span> <b>{g.class_type}</b>
+              <li key={`${g.node}-${g.class_type}-${i}`} className="rounded-panel border border-state-warn/40 bg-state-warn/5 p-2 text-note leading-snug">
+                <span className="mono text-caption text-state-warn">#{g.node}</span> <b>{g.class_type}</b>
                 <span className="text-ink-mute"> —— {g.reason}</span>
                 {g.pack ? <span className="text-ink-mute">（要装：{g.pack}）</span> : null}
               </li>
@@ -419,7 +239,7 @@ function AdaptTab({ wf }: { wf: Workflow }) {
       </section>
 
       {!!wf.pendingMedia?.length && (
-        <p className="text-note leading-snug text-warn">
+        <p className="text-note leading-snug text-state-warn">
           {wf.pendingMedia.length} 个素材位写的还是作者机器里的文件名（{wf.pendingMedia.slice(0, 3).join("、")}
           {wf.pendingMedia.length > 3 ? "…" : ""}），派发时必须由这次任务重新给素材，没给到的位置会被整条撤掉。
         </p>
@@ -518,7 +338,7 @@ function SlotsTab({
                     <Copyable text={s.address} className="max-w-[170px]">
                       <span className="mono">{s.address}</span>
                     </Copyable>
-                    {s.path && <div className="mono text-micro text-ink-mute">{s.path}</div>}
+                    {s.path && <div className="mono text-caption text-ink-mute">{s.path}</div>}
                   </td>
                   <td className="px-2 py-1.5 whitespace-nowrap">{s.name}</td>
                   <td className="mono px-2 py-1.5 text-caption text-ink-dim">{s.type}</td>
@@ -1021,307 +841,6 @@ function ExportTab({ wf }: { wf: Workflow }) {
           </pre>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ───────── 导入向导 ───────── */
-
-const STEPS = ["选实例与贴入图", "校验报告", "确认导入"] as const;
-
-function ImportWizard({
-  open,
-  onClose,
-  instances,
-  onImported,
-}: {
-  open: boolean;
-  onClose: () => void;
-  instances: GenInstance[];
-  onImported: (id: string) => void;
-}) {
-  const mut = useWorkflowMutations();
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState("");
-  const [instanceId, setInstanceId] = useState("");
-  const [json, setJson] = useState("");
-  const [ack, setAck] = useState(false);
-  const [dropHint, setDropHint] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setStep(0);
-    setAck(false);
-    setDropHint(null);
-    mut.importJson.reset();
-    mut.validate.reset();
-    // 只在弹窗打开时重置一次
-  }, [open]);
-
-  const report = mut.validate.data ?? mut.importJson.data?.report ?? null;
-  const chosen = instances.find((i) => i.id === instanceId) ?? null;
-  const importError = mut.validate.error?.message ?? mut.importJson.error?.message ?? null;
-
-  function onDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    file
-      .text()
-      .then((t) => {
-        setJson(t);
-        setDropHint(`已读入 ${file.name}`);
-        if (!name) setName(file.name.replace(/\.json$/i, ""));
-      })
-      .catch(() => setDropHint("这个文件读不出来"));
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="导入工作流"
-      width={760}
-      footer={
-        <>
-          <span className="mr-auto text-caption text-ink-mute">第 {step + 1} 步 / 共 3 步：{STEPS[step]}</span>
-          {step > 0 && (
-            <Button variant="quiet" onClick={() => setStep((s) => s - 1)}>
-              返回上一步
-            </Button>
-          )}
-          {step === 0 && (
-            <Button
-              variant="primary"
-              loading={mut.validate.isPending}
-              disabled={!json.trim() || !name.trim()}
-              onClick={() => mut.validate.mutate({ json, instanceId: instanceId || undefined }, { onSuccess: () => setStep(1) })}
-            >
-              校验并继续
-            </Button>
-          )}
-          {step === 1 && (
-            <Button variant="primary" disabled={!report} onClick={() => setStep(2)}>
-              看确认页
-            </Button>
-          )}
-          {step === 2 && (
-            <Button
-              variant="primary"
-              loading={mut.importJson.isPending}
-              disabled={!report || (report.errors.length > 0 && !ack)}
-              onClick={() =>
-                mut.importJson.mutate(
-                  { name: name.trim(), json, instanceId: instanceId || undefined },
-                  { onSuccess: (r) => onImported(r.workflow.id) },
-                )
-              }
-            >
-              导入并入库
-            </Button>
-          )}
-        </>
-      }
-    >
-      <div className="space-y-4">
-        {step === 0 && (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="工作流名称" hint="库里显示这个，别写得太长。">
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="H3 首尾帧 · 雨夜车内" />
-              </Field>
-              <Field label="目标实例" hint="校验会拿这台实例的 object_info 与模型列表比对。">
-                <Select value={instanceId} onChange={(e) => setInstanceId(e.target.value)} className="w-full">
-                  <option value="">不做实例比对</option>
-                  {instances.map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} · {i.protocol}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="label">工作流 JSON</div>
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={onDrop}
-                className="rounded-tile border border-dashed border-rule px-2.5 py-2 text-note leading-snug text-ink-mute"
-              >
-                把 <span className="mono">.json</span> 拖进来，或直接粘贴。UI 格式与 API 格式都收，我们判完格式再入库。
-                {dropHint && <span className="ml-2 text-ink-dim">{dropHint}</span>}
-              </div>
-              <Textarea
-                value={json}
-                onChange={(e) => setJson(e.target.value)}
-                rows={9}
-                className="mono w-full"
-                placeholder={'{"127":{"class_type":"UNETLoader","inputs":{...}}, ...}'}
-              />
-            </div>
-
-            {chosen && (
-              <div className="flex flex-wrap items-center gap-2 text-caption text-ink-mute">
-                <MachChip placement={chosen.placement} label={chosen.name} />
-                <span className="mono">{chosen.baseUrl}</span>
-                {chosen.lastProbeOk === false && <span className="text-state-fail">这台上次探活失败，比对结果可能不完整</span>}
-              </div>
-            )}
-          </>
-        )}
-
-        {step >= 1 && (
-          <>
-            {importError && <p className="text-note text-state-fail">{importError}</p>}
-            {!report ? (
-              <p className="text-note text-ink-mute">没有拿到校验结果。</p>
-            ) : (
-              <ReportView report={report} />
-            )}
-          </>
-        )}
-
-        {step === 2 && report && (
-          <div className="space-y-2 rounded-tile border border-rule bg-slate p-3">
-            <KeyVal
-              items={[
-                ["名称", name],
-                ["目标实例", chosen ? chosen.name : "不比对"],
-                ["源格式", report.sourceFormat === "api" ? "API 格式" : "UI 格式（已归一化成 API）"],
-                ["槽位数", report.slotCount],
-              ]}
-            />
-            {report.errors.length > 0 && (
-              <Toggle
-                checked={ack}
-                onChange={setAck}
-                label="我已确认这些节点在目标实例上不存在"
-                hint="不勾不让导入。导入只是把图存下来，不会替你装东西。"
-              />
-            )}
-            <p className="text-caption leading-snug text-ink-mute">
-              导入后这份图会出现在库左侧。要跑通还得补齐上面列出的缺失项。
-            </p>
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-function ReportView({ report }: { report: ImportReport }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={report.valid ? "good" : "bad"}>{report.valid ? "校验通过" : "有节点不认识"}</Badge>
-        <span className="text-note text-ink-dim">源格式 {report.sourceFormat}</span>
-        <span className="mono text-note text-ink-mute">{report.slotCount} 个槽位</span>
-        {report.estimated && (
-          <span className="mono text-caption text-ink-mute">
-            估算 {report.estimated.seconds} 秒 · {report.estimated.frames} 帧 · {report.estimated.width}×{report.estimated.height} · {report.estimated.steps} 步
-          </span>
-        )}
-      </div>
-
-      <Section title="未知节点" empty={report.unknownNodes.length === 0} hint="目标实例的 object_info 里没有这些 class_type。">
-        <Chips items={report.unknownNodes} />
-      </Section>
-
-      <Section
-        title="只能跑在 RunningHub 上的节点"
-        empty={report.runninghubOnlyNodes.length === 0}
-        hint="这些是平台专有节点，本机与自建云装不到，别当成可移植的图。"
-      >
-        <Chips items={report.runninghubOnlyNodes} tone="warn" />
-      </Section>
-
-      <Section title="缺失模型文件" empty={report.missingModels.length === 0} hint="按 models/{folder}/{filename} 摆放，或从别处拷过来。">
-        <ul className="space-y-1">
-          {report.missingModels.map((m, i) => (
-            <li key={i}>
-              <Copyable text={`models/${m.folder}/${m.filename}`} className="text-note">
-                <span className="mono">
-                  models/{m.folder}/<span className="text-ink">{m.filename}</span>
-                </span>
-              </Copyable>
-            </li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section title="缺失自定义节点" empty={report.missingCustomNodes.length === 0} hint="缺这些节点，POST /prompt 会在 node_errors 里报错。">
-        <Chips items={report.missingCustomNodes} />
-      </Section>
-
-      <Section title="错误" empty={report.errors.length === 0}>
-        <ul className="space-y-1.5">
-          {report.errors.map((e, i) => (
-            <li key={i} className="rounded-ctl border border-rule-soft bg-slate px-2 py-1.5 text-note leading-snug">
-              <div className="text-ink">{e.message}</div>
-              <div className="mono text-caption text-ink-mute">
-                {e.node ? `节点 ${e.node}` : ""}
-                {e.classType ? ` · ${e.classType}` : ""}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section title="提醒" empty={report.warnings.length === 0}>
-        <ul className="space-y-1 text-note leading-snug text-ink-dim">
-          {report.warnings.map((w, i) => (
-            <li key={i}>{w}</li>
-          ))}
-        </ul>
-      </Section>
-
-      {report.installPlan && report.installPlan.length > 0 && (
-        <div className="space-y-1.5 rounded-tile border border-rule bg-slate p-2.5">
-          <div className="label">可执行的安装命令（我们不会替你跑）</div>
-          <ul className="space-y-1">
-            {report.installPlan.map((cmd, i) => (
-              <li key={i}>
-                <Copyable text={cmd} className="text-note">
-                  <span className="mono">{cmd}</span>
-                </Copyable>
-              </li>
-            ))}
-          </ul>
-          <p className="text-caption leading-snug text-ink-mute">
-            装完记得重新探活实例，再回这一页重跑一次校验。任何 pip 或 Comfy-Manager 操作都由你自己执行。
-          </p>
-        </div>
-      )}
-
-      {report.valid && report.warnings.length === 0 && (
-        <p className="text-note text-ink-dim">这份图在目标实例上没有障碍。</p>
-      )}
-    </div>
-  );
-}
-
-function Section({ title, empty, hint, children }: { title: string; empty: boolean; hint?: ReactNode; children?: ReactNode }) {
-  return (
-    <div className="space-y-1 border-t border-rule-soft pt-2">
-      <div className="flex items-baseline gap-2">
-        <span className="label">{title}</span>
-        {empty && <span className="text-caption text-ink-mute">没有</span>}
-      </div>
-      {!empty && children}
-      {!empty && hint && <p className="text-caption leading-snug text-ink-mute">{hint}</p>}
-    </div>
-  );
-}
-
-function Chips({ items, tone = "neutral" }: { items: string[]; tone?: "neutral" | "warn" }) {
-  return (
-    <div className="flex flex-wrap gap-1">
-      {items.map((t) => (
-        <Badge key={t} tone={tone}>
-          {t}
-        </Badge>
-      ))}
     </div>
   );
 }

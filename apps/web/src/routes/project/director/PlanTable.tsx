@@ -30,6 +30,8 @@ const DERIVED_LABEL: Record<string, string> = {
   refCount: "参考图",
   segmentCount: "段数",
   graphNodes: "节点",
+  chosenBy: "选法",
+  workflowName: "工作流",
 };
 
 function fmtEta(sec: unknown): string {
@@ -55,19 +57,19 @@ export function PlanTable({ plan, busy, error, onPatch, onRevalidate, onConfirm,
 
   return (
     <div className="space-y-2.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-dim">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-note text-ink-dim">
         <span>
           共 <span className="mono text-ink">{plan?.totals.count ?? 0}</span> 条，
-          <span className={blocked ? "text-[color:var(--color-state-fail)]" : "text-[color:var(--color-state-ok)]"}>
+          <span className={blocked ? "text-state-fail" : "text-state-ok"}>
             {blocked ? ` ${blocked} 条被拦下` : " 没有拦下项"}
           </span>
         </span>
         <span>
           预计合计 <span className="mono text-ink">{fmtEta(plan?.totals.etaSeconds)}</span>
-          <span className="ml-1 text-[10.5px] text-ink-mute">（外推，非实测：视频锚 864×480/56 帧/Turbo8=443s）</span>
+          <span className="ml-1 text-caption text-ink-mute">（外推，非实测：视频锚 864×480/56 帧/Turbo8=443s）</span>
         </span>
-        <span className="ml-auto flex items-center gap-1.5">
-          {busy && <span className="text-[10.5px] text-ink-mute">重新校验中…</span>}
+        <span className="ml-auto flex items-center gap-2">
+          {busy && <span className="text-caption text-ink-mute">重新校验中…</span>}
           <Button size="sm" variant="ghost" onClick={onRevalidate} disabled={busy} title="按当前数值再问一次后端">
             重新校验
           </Button>
@@ -75,42 +77,42 @@ export function PlanTable({ plan, busy, error, onPatch, onRevalidate, onConfirm,
       </div>
 
       {error && (
-        <p className="flex items-start gap-1.5 rounded-ctl border border-[color:var(--color-state-fail)]/40 bg-[color:var(--color-state-fail)]/10 px-2 py-1.5 text-[11px] leading-snug text-ink">
-          <AlertCircle className="mt-[1px] h-3 w-3 flex-none" />
+        <p className="flex items-start gap-1.5 rounded-ctl border border-state-fail/40 bg-state-fail/10 px-2 py-1.5 text-note leading-snug text-ink">
+          <AlertCircle className="mt-[1px] h-3 w-3 flex-none" aria-hidden />
           <span>后端参数表没拿到：{error}。这张表只是确认用，你也可以直接派发——但那就等于回到「跑出问题才知道」。</span>
         </p>
       )}
 
       <div className="max-h-[52vh] space-y-1.5 overflow-y-auto pr-1">
         {rows.map((r) => (
-          <div key={r.index} className={r.blocked ? "rounded-ctl border border-[color:var(--color-state-fail)]/45 bg-[color:var(--color-state-fail)]/[0.07] p-2" : "rounded-ctl border border-rule-soft bg-white/[0.03] p-2"}>
+          <div key={r.index} className={r.blocked ? "rounded-ctl border border-state-fail/45 bg-state-fail/10 p-2" : "rounded-ctl border border-rule-soft bg-sheen p-2"}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="mono text-[11px] text-ink">{r.title}</span>
+              <span className="mono text-caption text-ink">{r.title}</span>
               <Badge>{r.template}</Badge>
               {r.instance && (
-                <span className="text-[10.5px] text-ink-mute">
+                <span className="text-caption text-ink-mute">
                   {r.instance.label || `实例 ${r.instance.id}`} · {r.instance.placement}
                   {r.instance.probeOk === false ? " · 探活失败" : ""}
                   {r.instance.circuitOpen ? " · 已熔断" : ""}
                 </span>
               )}
-              <span className="ml-auto text-[10.5px] text-ink-mute">{fmtEta(r.derived.etaSeconds)}</span>
+              <span className="ml-auto text-caption text-ink-mute">{fmtEta(r.derived.etaSeconds)}</span>
             </div>
 
-            <div className="mt-1.5 flex flex-wrap items-end gap-1.5">
+            <div className="mt-1.5 flex flex-wrap items-end gap-2">
               {Object.entries(EDITABLE)
                 .filter(([k]) => k in r.slots)
                 .map(([k, meta]) =>
                   meta.kind === "bool" ? (
-                    <span key={k} className="flex items-center gap-1 rounded-ctl border border-rule bg-raised px-1.5 py-[3px]">
-                      <span className="mono text-[10px] text-ink-mute">{meta.label}</span>
+                    <span key={k} className="flex h-7 items-center gap-1.5 rounded-ctl border border-rule bg-raised px-2">
+                      <span className="mono text-caption text-ink-mute">{meta.label}</span>
                       <Toggle checked={!!r.slots[k]} onChange={(v) => onPatch(r.index, k, v)} label={`${r.title} ${meta.label}`} />
                     </span>
                   ) : (
-                    <label key={k} className="flex items-center gap-1">
-                      <span className="mono text-[10px] text-ink-mute">{meta.label}</span>
+                    <label key={k} className="flex items-center gap-1.5">
+                      <span className="mono text-caption text-ink-mute">{meta.label}</span>
                       <Input
-                        className="h-6 w-[68px] text-[11px]"
+                        className="w-[68px]"
                         type="number"
                         step={meta.kind === "float" ? "0.1" : "1"}
                         defaultValue={r.slots[k] as number | string}
@@ -126,36 +128,36 @@ export function PlanTable({ plan, busy, error, onPatch, onRevalidate, onConfirm,
                   ),
                 )}
               {Object.entries(DERIVED_LABEL).map(([k, label]) =>
-                r.derived[k] === undefined || r.derived[k] === null ? null : (
-                  <span key={k} className="mono rounded-ctl border border-rule-soft bg-raised/60 px-1.5 py-[3px] text-[10px] text-ink-dim">
-                    {label} {String(r.derived[k])}
+                r.derived[k] === undefined || r.derived[k] === null || r.derived[k] === "" ? null : (
+                  <span key={k} className="mono rounded-ctl border border-rule-soft bg-raised/60 px-1.5 py-[3px] text-caption text-ink-dim">
+                    {label} {Array.isArray(r.derived[k]) ? r.derived[k].join("、") : String(r.derived[k])}
                   </span>
                 ),
               )}
-              {!!r.slots.filename_prefix && <span className="mono text-[10px] text-ink-mute">→ {String(r.slots.filename_prefix)}</span>}
+              {!!r.slots.filename_prefix && <span className="mono text-caption text-ink-mute">→ {String(r.slots.filename_prefix)}</span>}
             </div>
 
             {r.problems.length > 0 && (
               <ul className="mt-1.5 space-y-0.5">
                 {r.problems.map((p) => (
-                  <li key={p} className={r.blocked ? "flex items-start gap-1.5 text-[10.5px] leading-snug text-[color:var(--color-state-fail)]" : "flex items-start gap-1.5 text-[10.5px] leading-snug text-[color:var(--color-mach-rh)]"}>
-                    <AlertCircle className="mt-[1px] h-3 w-3 flex-none" />
+                  <li key={p} className={r.blocked ? "flex items-start gap-1.5 text-note leading-snug text-state-fail" : "flex items-start gap-1.5 text-note leading-snug text-state-warn"}>
+                    <AlertCircle className="mt-[1px] h-3 w-3 flex-none" aria-hidden />
                     <span>{p}</span>
                   </li>
                 ))}
               </ul>
             )}
             {!r.problems.length && (
-              <p className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-[color:var(--color-state-ok)]">
-                <CircleCheck className="h-3 w-3" /> 参数与形状都过了
+              <p className="mt-1.5 flex items-center gap-1.5 text-note text-state-ok">
+                <CircleCheck className="h-3 w-3 flex-none" aria-hidden /> 参数与形状都过了
               </p>
             )}
           </div>
         ))}
-        {!rows.length && !busy && <p className="text-[11.5px] text-ink-mute">后端没给出任何行。</p>}
+        {!rows.length && !busy && <p className="text-note text-ink-mute">后端没给出任何行。</p>}
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-ink-mute">
+      <div className="flex items-center gap-2 text-caption text-ink-mute">
         <span>被拦下的条目不会进队列。改数值直接在上面改，改完自动重问一次。</span>
       </div>
 

@@ -9,7 +9,7 @@
  * 两处两套说法就会出现「界面显示的是 A、请求发出去是 B」。
  */
 
-import type { GenPreset, Project, Workflow } from "./types";
+import type { Character, GenInstance, GenPreset, Project, ProjectConfig, Scene, Shot, Workflow } from "./types";
 
 export type GenKind = "image" | "video" | "audio";
 
@@ -65,13 +65,74 @@ export function presetToRequest(project: Project, kind: GenKind, preset?: GenPre
   return { template: ref.replace(/^builtin:/, ""), instanceId, models };
 }
 
-/** 一行小结，给卡片与下拉旁边的说明用 */
-export function describePreset(project: Project, kind: GenKind, preset: GenPreset | undefined, workflows: Workflow[]): string {
-  const eff = effectivePreset(project, kind, preset);
-  const ref = workflowRef(eff.workflow);
-  const hit = ref ? workflows.find((w) => w.id === ref) : null;
-  const wfLabel = !ref ? "自动挑" : hit?.name ?? eff.workflow;
-  const inst = eff.instanceId ? `@${eff.instanceId}` : "@跟随默认";
-  const n = Object.keys(eff.models).length;
-  return `${wfLabel}${inst}${n ? ` · 换 ${n} 个模型` : ""}`;
+/* ───────── 实例死指针的迁移 ───────── */
+
+/**
+ * 实例行是会没的，项目里存的实例 id 不会跟着变。
+ *
+ * 本机 ComfyUI 那行被删过之后重建，id 从 503 变成 530，于是项目里每个指着 503 的指针都成了
+ * 死链：出图出片全先撞在「实例不在已登记的实例里」上，而那看起来像参数填错。
+ * 登记的实例**只有一台**时这个映射没有歧义，直接搬过去；不止一台就只摘不猜 ——
+ * 猜错实例的代价是白烧十几分钟显存，宁可回落到后端登记的默认实例。
+ *
+ * 只动「以后要用哪台」的指针。renderLogs 里的 instanceId 是当时的事实记录，不改写历史。
+ */
+export interface PointerSync {
+  config: Partial<ProjectConfig>;
+  data: { characters?: Character[]; scenes?: Scene[]; shots?: Shot[] };
+  /** 逐条说清改了什么，形如「镜 1·实例：503 → 530」；界面上要能原话讲出来 */
+  changes: string[];
+}
+
+export function syncInstancePointers(project: Project, instances: GenInstance[]): PointerSync | null {
+  const alive = instances.map((i) => String(i.id));
+  const known = new Set(alive);
+  const target = alive.length === 1 ? alive[0] : null;
+  const changes: string[] = [];
+
+  /** 返回新值代表这一处要改（null = 摘掉跟默认走）；返回 undefined 代表不用动 */
+  const move = (from: string | null | undefined, where: string): string | null | undefined => {
+    if (!from || known.has(String(from))) return undefined;
+    changes.push(target ? `${where}：${from} → ${target}` : `${where}：${from} 已不存在，改回跟随后端默认实例`);
+    return target;
+  };
+
+  const config: Partial<ProjectConfig> = {};
+  const cfgImage = move(project.config.imageInstanceId, "项目默认·出图");
+  if (cfgImage !== undefined) config.imageInstanceId = cfgImage;
+  const cfgVideo = move(project.config.videoInstanceId, "项目默认·出片");
+  if (cfgVideo !== undefined) config.videoInstanceId = cfgVideo;
+
+  const data: PointerSync["data"] = {};
+
+  const shots = project.data.shots.map((s) => {
+    const legacy = move(s.instanceId, `镜 ${s.index}·实例`);
+    const presetTo = move(s.preset?.instanceId, `镜 ${s.index}·生成选择`);
+    if (legacy === undefined && presetTo === undefined) return s;
+    const next = { ...s };
+    if (legacy !== undefined) next.instanceId = legacy;
+    if (presetTo !== undefined) next.preset = { ...s.preset, instanceId: presetTo };
+    return next;
+  });
+  if (shots.some((s, i) => s !== project.data.shots[i])) data.shots = shots;
+
+  const characters = project.data.characters.map((c) => {
+    const presetTo = move(c.preset?.instanceId, `角色 ${c.name}·生成选择`);
+    const voiceTo = move(c.voice?.preset?.instanceId, `角色 ${c.name}·音色`);
+    if (presetTo === undefined && voiceTo === undefined) return c;
+    const next = { ...c };
+    if (presetTo !== undefined) next.preset = { ...c.preset, instanceId: presetTo };
+    if (voiceTo !== undefined && c.voice) next.voice = { ...c.voice, preset: { ...c.voice.preset, instanceId: voiceTo } };
+    return next;
+  });
+  if (characters.some((c, i) => c !== project.data.characters[i])) data.characters = characters;
+
+  const scenes = project.data.scenes.map((s) => {
+    const to = move(s.preset?.instanceId, `场景 ${s.name}·生成选择`);
+    return to === undefined ? s : { ...s, preset: { ...s.preset, instanceId: to } };
+  });
+  if (scenes.some((s, i) => s !== project.data.scenes[i])) data.scenes = scenes;
+
+  if (!changes.length) return null;
+  return { config, data, changes };
 }

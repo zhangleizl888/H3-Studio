@@ -161,7 +161,7 @@ export function Panel({
       {(title || actions) && (
         <header className="flex items-center justify-between gap-3 border-b border-rule-soft px-3 py-1.5">
           <h2 className="text-note font-semibold text-ink-dim">{title}</h2>
-          {actions && <div className="flex items-center gap-1.5">{actions}</div>}
+          {actions && <div className="flex items-center gap-2">{actions}</div>}
         </header>
       )}
       <div className={cn(dense ? "" : "p-3", bodyClass)}>{children}</div>
@@ -273,7 +273,7 @@ export function Progress({
       >
         {pctv !== null && (
           <div
-            className="h-full transition-[width] duration-500"
+            className="h-full transition-[width] duration-400"
             style={{ width: `${pctv}%`, background: machine ?? "var(--color-state-running)" }}
           />
         )}
@@ -289,7 +289,7 @@ export function Progress({
 export function Badge({ children, tone = "neutral", className }: { children: ReactNode; tone?: "neutral" | "warn" | "bad" | "good"; className?: string }) {
   const tones = {
     neutral: "border-rule text-ink-dim",
-    warn: "border-mach-rh/50 text-mach-rh",
+    warn: "border-state-warn/50 text-state-warn",
     bad: "border-state-fail/50 text-state-fail",
     good: "border-state-ok/45 text-state-ok",
   } as const;
@@ -390,7 +390,7 @@ export function Modal({
         aria-labelledby={titleId}
         onMouseDown={(e) => e.stopPropagation()}
         style={{ maxWidth: width }}
-        className="mt-6 w-full rounded-sheet border border-rule bg-panel shadow-[0_18px_50px_rgba(0,0,0,.55)]"
+        className="mt-6 w-full rounded-sheet border border-rule bg-panel shadow-sheet"
       >
         <header className="flex items-center justify-between border-b border-rule-soft px-3 py-2">
           <h2 id={titleId} className="text-body font-semibold">
@@ -456,18 +456,18 @@ export function MediaFrame({
       style={{ aspectRatio: aspect, background: bg }}
     >
       {kind === "video" && (
-        <svg viewBox="0 0 24 24" className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 text-white/70" aria-hidden>
+        <svg viewBox="0 0 24 24" className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 text-on-scrim/70" aria-hidden>
           <path d="M8 5v14l11-7z" fill="currentColor" />
         </svg>
       )}
       {kind === "audio" && (
         <div className="absolute inset-x-2 bottom-2 flex h-4 items-end gap-[2px]">
           {Array.from({ length: 26 }).map((_, i) => (
-            <span key={i} className="flex-1 bg-white/45" style={{ height: `${20 + ((h >> i) % 80)}%` }} />
+            <span key={i} className="flex-1 bg-on-scrim/45" style={{ height: `${20 + ((h >> i) % 80)}%` }} />
           ))}
         </div>
       )}
-      {label && <div className="absolute bottom-0 left-0 right-0 bg-black/45 px-1.5 py-[2px] text-micro text-white/85">{label}</div>}
+      {label && <div className="absolute bottom-0 left-0 right-0 bg-scrim/70 px-1.5 py-[2px] text-micro text-on-scrim">{label}</div>}
     </div>
   );
 }
@@ -497,7 +497,7 @@ export function Copyable({ text, children, className }: { text: string; children
     >
       <span className="mono truncate">{children ?? text}</span>
       {/* 只在 hover 出现的提示，键盘用户永远看不见：焦点也要点亮它 */}
-      <span aria-live="polite" className="flex-none text-micro text-ink-mute opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+      <span aria-live="polite" className="flex-none text-caption text-ink-mute opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
         {done ? "已复制" : "复制"}
       </span>
     </button>
@@ -511,6 +511,7 @@ export function Copyable({ text, children, className }: { text: string; children
 export function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(

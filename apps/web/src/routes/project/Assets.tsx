@@ -14,12 +14,12 @@ import { Archive, Images, Monitor, Plus, RefreshCw, Smartphone, Sparkles, Wand2 
 import { Badge, Button, Empty, Select, Skeleton, Spinner, Tabs } from "../../components/ui";
 import { VersionGroup } from "../../components/VersionHistory";
 import { useApi } from "../../lib/apiClient";
-import { keys, useGpuState, useInstances, useMedia, useProject, useProjectMutations, useWorkflows } from "../../lib/hooks";
-import { characterRequest, sceneRequest, variationRequest, type GenTarget } from "../../lib/generate";
+import { keys, useGpuState, useInstances, useMedia, useProject, useProjectMutations, useInstancePointerSync, useWorkflows } from "../../lib/hooks";
+import { characterRequest, sceneRequest, variationRequest, voiceRequest, type GenTarget } from "../../lib/generate";
 import { genKey, useGenerator } from "../../lib/useGenerate";
 import { IMAGE_SIZES } from "../../lib/prompts";
 import { importAssetIntoProject, saveCharacterAsset, saveSceneAsset } from "../../lib/localStores";
-import type { AssetLibraryItem, Character, Media, Project, Scene } from "../../lib/types";
+import type { AssetLibraryItem, Character, Media, Project, Scene, VoiceProfile } from "../../lib/types";
 import type { GenerateRequest } from "../../lib/api";
 import { cn, isStill, uid } from "../../lib/utils";
 import { CharacterCard } from "./assets/CharacterCard";
@@ -67,6 +67,11 @@ export default function Assets() {
 
   const noticeTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
+
+  // 实例被删过就不会自己回来：项目里那些实例指针要是还指着旧的行，每条生成都会撞墙
+  useInstancePointerSync(project, (changes) =>
+    flash("info", `实例指针已对齐：${changes.join("；")}。（实例行被删过，项目里存的还是旧 id）`),
+  );
   function flash(tone: Notice["tone"], text: string) {
     setNotice({ tone, text });
     window.clearTimeout(noticeTimer.current);
@@ -144,6 +149,7 @@ export default function Assets() {
 
   const genCharacter = (c: Character) => project && generate({ kind: "character", characterId: c.id }, characterRequest(project, c), `定妆 · ${c.name}`);
   const genScene = (s: Scene) => project && generate({ kind: "scene", sceneId: s.id }, sceneRequest(project, s), `场景 · ${s.name}`);
+  const genVoice = (c: Character) => project && generate({ kind: "voice", characterId: c.id }, voiceRequest(project, c), `音色 · ${c.name}`);
 
   function genVariation(c: Character, variationId: string) {
     if (!project) return;
@@ -219,7 +225,7 @@ export default function Assets() {
       const m = await api.media.put(file, role, refId, projectId);
       await qc.invalidateQueries({ queryKey: keys.media(projectId) });
       await edit((p) => apply(p, m.id), ["characters", "scenes"]);
-      flash("good", `${label}：已把 ${file.name} 设为参考图`);
+      flash("good", `${label} · ${file.name}`);
     } catch (e) {
       flash("bad", `上传失败：${msg(e)}`);
     }
@@ -243,6 +249,22 @@ export default function Assets() {
     v.refMediaIds = [mediaId, ...v.refMediaIds.filter((x) => x !== mediaId)];
     v.status = "completed";
   };
+
+  /** 参考音频与样音是两回事：前者是克隆的底子，后者是这条链路的产出 */
+  const attachVoiceAudio = (charId: string) => (p: Project, mediaId: string) => {
+    const c = p.data.characters.find((x) => x.id === charId);
+    if (!c) return;
+    c.voice ??= { refAudioIds: [], sampleMediaIds: [] };
+    c.voice.refAudioIds = [mediaId, ...c.voice.refAudioIds.filter((x) => x !== mediaId)];
+    c.voice.status = "pending";
+  };
+
+  const patchVoice = (charId: string) => (patch: Partial<VoiceProfile>) =>
+    void edit((p) => {
+      const c = p.data.characters.find((x) => x.id === charId);
+      if (!c) return;
+      c.voice = { refAudioIds: [], sampleMediaIds: [], ...c.voice, ...patch };
+    });
 
   /* ───────── 资产库 ───────── */
 
@@ -411,10 +433,10 @@ export default function Assets() {
             <span className="h-6 w-px flex-none bg-hairline" aria-hidden />
 
             <label className="flex items-center gap-1.5">
-              <span className="label-mono">模型</span>
+              <span className="label-mono" title="没单独指定的角色/场景就用这条；单个资产可在卡片里改">默认工作流</span>
               <Select
                 value={currentTemplate}
-                onChange={(e) => void dataMut.config.mutateAsync({ imageTemplate: e.target.value }).catch((x: unknown) => flash("bad", `保存模型选择失败：${msg(x)}`))}
+                onChange={(e) => void dataMut.config.mutateAsync({ imageTemplate: e.target.value }).catch((x: unknown) => flash("bad", `保存默认工作流失败：${msg(x)}`))}
                 className="h-8 max-w-[220px]"
                 title="出图用的生成模板或库工作流"
               >
@@ -440,9 +462,9 @@ export default function Assets() {
               </Select>
             </label>
             {isLibraryTemplate && (
-              <span title="库工作流的图要在后端按 graph 提交，而生成请求只带 template key —— 选它出图会被后端打回，先换回内置模板">
-                <Badge tone="warn" className="flex-none">
-                  库工作流·还不能直接出图
+              <span title="这条库工作流会由后端按自己的槽位填图；缺什么它会如实报在参数表上">
+                <Badge tone="neutral" className="flex-none">
+                  出图走库工作流
                 </Badge>
               </span>
             )}
@@ -534,7 +556,7 @@ export default function Assets() {
             )}
           >
             <span>{notice.text}</span>
-            <button onClick={() => setNotice(null)} className="flex-none text-caption text-ink-mute hover:text-ink" aria-label="关闭提示">
+            <button type="button" onClick={() => setNotice(null)} className="flex-none text-caption text-ink-mute hover:text-ink" aria-label="关闭提示">
               知道了
             </button>
           </div>
@@ -583,8 +605,12 @@ export default function Assets() {
                       char={c}
                       mediaById={mediaById}
                       handle={handles[genKey({ kind: "character", characterId: c.id })]}
+                      voiceHandle={handles[genKey({ kind: "voice", characterId: c.id })]}
                       onGenerate={() => void genCharacter(c)}
+                      onGenerateVoice={() => void genVoice(c)}
                       onUpload={(file) => void upload(file, "character", c.id, attachCharacter(c.id), `已上传 ${c.name} 的定妆照`)}
+                      onUploadAudio={(file) => void upload(file, "voice_ref", c.id, attachVoiceAudio(c.id), `已给 ${c.name} 换上参考音频`)}
+                      onPatchVoice={patchVoice(c.id)}
                       onPatch={(patch) => void edit((p) => {
                         const x = p.data.characters.find((y) => y.id === c.id);
                         if (x) Object.assign(x, patch);
@@ -677,12 +703,12 @@ export default function Assets() {
 
       {/* ③ 批量遮罩 */}
       {batch && (
-        <div role="status" aria-live="polite" className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-void/85 backdrop-blur-md">
+        <div role="status" aria-live="polite" className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-scrim/85 backdrop-blur-md">
           <Spinner className="h-10 w-10 text-chrome" />
           <div className="text-subtitle font-semibold">正在批量生成{batch.label}</div>
           <div className="h-1.5 w-64 overflow-hidden rounded-hairline bg-hairline">
             <div
-              className="h-full transition-[width] duration-500"
+              className="h-full transition-[width] duration-400"
               style={{ width: `${Math.round((batchDone / Math.max(1, batch.keys.length)) * 100)}%`, background: "linear-gradient(90deg, var(--color-chrome), var(--color-chrome-2))" }}
             />
           </div>
@@ -740,6 +766,7 @@ export default function Assets() {
 
       {creating === "character" && (
         <NewCharacterSheet
+          project={project}
           onClose={() => setCreating(null)}
           onCreate={(c) => {
             setCreating(null);
@@ -750,6 +777,7 @@ export default function Assets() {
       )}
       {creating === "scene" && (
         <NewSceneSheet
+          project={project}
           onClose={() => setCreating(null)}
           onCreate={(s) => {
             setCreating(null);
@@ -775,7 +803,7 @@ function PreviewBody({ media, title }: { media: Media; title: string }) {
   return (
     <div className="space-y-2">
       {src ? (
-        <img src={src} alt={title} className="max-h-[62vh] w-full rounded-panel border border-hairline bg-void/70 object-contain" />
+        <img src={src} alt={title} className="max-h-[62vh] w-full rounded-panel border border-hairline bg-scrim/70 object-contain" />
       ) : (
         <div className="grid h-64 place-items-center rounded-panel border border-hairline text-note text-ink-mute">
           {still ? "这张图读不回来：可能只存在于原项目的媒体库里" : "这条记录不是静帧，没有可显示的封面"}

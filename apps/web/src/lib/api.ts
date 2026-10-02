@@ -1,5 +1,7 @@
 import type {
+  BindingSyncResult,
   GenInstance,
+  GraphReplaceResult,
   H3PromptMode,
   LlmPurpose,
   ImportReport,
@@ -10,16 +12,24 @@ import type {
   Media,
   NodeOverride,
   ParsedScript,
+  PingResult,
   ProbeReport,
   Project,
   RescanReport,
   ScriptVersionRow,
   ScriptVersionSource,
+  Skill,
+  SkillDraft,
+  SkillImportReport,
+  SkillStage,
+  SyncAllResult,
   TrashList,
   User,
   VersionBucket,
   VisualStyle,
   Workflow,
+  WorkflowBinding,
+  WorkflowCheckResult,
   WorkflowModelOptions,
   WorkflowSlot,
 } from "./types";
@@ -67,6 +77,8 @@ export interface LlmRunOpts {
   script?: string;
   /** script_chat：往轮对话。assistant 只带说明文字，别把上一轮的整篇正文再喂一遍 */
   messages?: { role: "user" | "assistant"; content: string }[];
+  /** 技能库里的 id：正文由后端读库拼进这次调用的 system，前端不重发正文 */
+  skillIds?: string[];
 }
 
 /**
@@ -78,14 +90,23 @@ export interface Api {
     login(username: string, password: string): Promise<{ user: User; access: string; refresh: string }>;
     me(): Promise<User | null>;
     logout(): Promise<void>;
+    /** 改自己的口令；成功后服务端已把这个账号的浏览器会话全部吊销，调用方要当作「得重新登录」处理 */
+    changePassword(current: string, next: string): Promise<void>;
     setupRequired(): Promise<boolean>;
   };
   instances: {
     list(): Promise<GenInstance[]>;
-    create(body: Partial<GenInstance> & { name: string; protocol: GenInstance["protocol"] }): Promise<GenInstance>;
-    update(id: string, body: Partial<GenInstance>): Promise<GenInstance>;
+    /**
+     * apiKey 只能这样单独给一个字段：GenInstance 上那个 `apiKeySet` 是「后端告诉你这里存过一把 key」
+     * 的只读标记，页面把它当输入发回去等于什么都没发（这个坑真踩过 —— 云端实例建出来一直是没 key 的）。
+     * update 时省略 = 不动已存的；显式 null = 清掉。
+     */
+    create(body: Partial<GenInstance> & { name: string; protocol: GenInstance["protocol"]; apiKey?: string | null }): Promise<GenInstance>;
+    update(id: string, body: Partial<GenInstance> & { apiKey?: string | null }): Promise<GenInstance>;
     remove(id: string): Promise<void>;
     probe(id: string): Promise<ProbeReport>;
+    /** 轻量在线探测：只问 /system_stats 与 /queue，给管理页十几秒一次刷在线状态用 */
+    ping(id: string): Promise<PingResult>;
     /** 新建前的连通性试探，不落库 */
     dryProbe(body: { protocol: GenInstance["protocol"]; baseUrl: string; apiKey?: string; site?: string }): Promise<ProbeReport>;
   };
@@ -106,22 +127,63 @@ export interface Api {
   workflows: {
     list(): Promise<Workflow[]>;
     get(id: string): Promise<Workflow>;
-    importJson(name: string, json: string, instanceId?: string): Promise<{ workflow: Workflow; report: ImportReport }>;
+    /**
+     * 导入一份导出。同一个工作流常常有 API 版与画布版两份：
+     * API 版当可执行图、画布版存成 ui_graph，省掉一次有损往返，所以两个文件一起给。
+     */
+    importJson(body: {
+      name: string;
+      json: string;
+      uiJson?: string;
+      description?: string;
+      instanceId?: string;
+      priority?: number;
+      tags?: string[];
+    }): Promise<{ workflow: Workflow; report: ImportReport }>;
     validate(graph: string, instanceId?: string): Promise<ImportReport>;
     remove(id: string): Promise<void>;
     export(id: string, format: "api" | "ui"): Promise<string>;
     slots(id: string): Promise<WorkflowSlot[]>;
     /** 这条工作流在那台实例上可换哪些权重（清单只来自实例的 /object_info，不是前端硬编码） */
     modelOptions(id: string, instanceId?: string): Promise<WorkflowModelOptions>;
+    /** 这条工作流在每台实例上的默认权重 */
+    bindings(id: string): Promise<{ workflowId: string; workflowName: string; bindings: WorkflowBinding[] }>;
+    /** 保存绑定；overrides 全空等于删掉这条绑定（恢复用图里写死的权重） */
+    saveBindings(id: string, body: { instanceId: string; overrides: Record<string, string> }): Promise<{ workflowId: string; instanceId: string; overrides: Record<string, string> }>;
+    clearBindings(id: string, instanceId: string): Promise<void>;
+    /** 把一台配好的默认权重搬到别处（同名沿用，认不出族就不换，缺节点的台整条标灰） */
+    syncBindings(id: string, body: { sourceInstanceId: string; targetInstanceIds: string[]; alignUnbound?: boolean }): Promise<BindingSyncResult>;
+    /** 整库对齐：接了第二台 ComfyUI 时不必逐条点。onlyMissing 只补目标上还没配过的条目 */
+    syncAll(body: { sourceInstanceId: string; targetInstanceIds: string[]; alignUnbound?: boolean; onlyMissing?: boolean; includeBuiltin?: boolean }): Promise<SyncAllResult>;
+    /** 体检：逐台回答「这条在这台上跑不跑得动、用的是哪些权重」。只读。 */
+    check(id: string, instanceIds?: string[]): Promise<WorkflowCheckResult>;
+    /** 换掉库里这条的图（走与导入完全同一条改写流水线），并剪掉指向失效节点的绑定 */
+    replaceGraph(id: string, body: { graph: string; instanceId?: string }): Promise<GraphReplaceResult>;
     /** slots 投影成 RunningHub 的 nodeInfoList 骨架 */
     nodeOverrides(id: string, values: Record<string, unknown>): Promise<NodeOverride[]>;
-    testRun(id: string, instanceId: string): Promise<Job>;
+    testRun(id: string, instanceId: string, slots?: Record<string, unknown>): Promise<Job>;
     /** 装了节点包 / 换了实例之后重算：后端从原始导出重改写，不累积上一次改动 */
     rescan(id: string, instanceId?: string): Promise<{ workflow: Workflow; report: RescanReport }>;
     /** 改「要不要参与自动选」与优先级 */
     patch(id: string, body: { autoSelect?: boolean; priority?: number; description?: string; tags?: string[] }): Promise<Workflow>;
     /** 只排序不建任务：这次任务会挑中哪条、凭什么是它 */
     selectPreview(kind: string, slots: Record<string, unknown>, instanceId?: string): Promise<WorkflowPickResult>;
+  };
+  /**
+   * 技能库：一段可复用的写法要求，挂在提示词框旁边。
+   *
+   * 库在服务端（跨项目、跨浏览器共享），项目里只存选中的 id；正文由后端在提交那一刻
+   * 读出来并进提示词 / system，所以改一次技能，所有挂着它的资产下次生成都跟着变。
+   */
+  skills: {
+    list(stage?: SkillStage): Promise<Skill[]>;
+    create(body: SkillDraft): Promise<Skill>;
+    update(id: string, body: SkillDraft): Promise<Skill>;
+    remove(id: string): Promise<void>;
+    /** 一次导多个文件，或者整个文件夹；同名走刷新而不是再插一条 */
+    importFiles(files: File[], library?: string): Promise<SkillImportReport>;
+    /** 清空整个技能库。后端要求原样填那句确认词，界面就照它给 */
+    clear(): Promise<{ deleted: number; names: string[] }>;
   };
   projects: {
     list(): Promise<Project[]>;
@@ -232,6 +294,13 @@ export interface Api {
       byProject: { projectId: string; name: string; bytes: number; count: number }[];
     }>;
     gc(dryRun: boolean): Promise<{ reclaimableBytes: number; orphans: number; dryRun?: boolean }>;
+    /** 目录设置的真值：后端实际在用哪份、来源是环境变量还是库里存的 */
+    paths(): Promise<SystemPaths>;
+    savePaths(body: SystemPathsBody): Promise<{ paths: SystemPaths; needsRestart: string[] }>;
+    /** 操作记录。这一栏以前是页面里写死的示例，出事时回溯不到任何东西 */
+    audit(opts?: { limit?: number; action?: string; actor?: string }): Promise<AuditTrail>;
+    /** 备份命令：按当前真实连接串拼（内嵌 pgserver 的端口每次启动都会变） */
+    backup(): Promise<BackupCommands>;
     /** 单卡仲裁状态：谁正占着这张 4090 */
     gpu(): Promise<GpuState>;
     gpuYield(): Promise<{ yielded: boolean; reason?: string }>;
@@ -271,6 +340,8 @@ export interface GenerateRequest {
   models?: Record<string, string>;
   /** 产物落库时打成谁的 —— 角色定妆照 / 场景图 / 某镜的首帧。promptMode 让后端能核对提示词形状 */
   meta?: { role: string; refId: string; promptMode?: string };
+  /** 技能库里的 id。后端读正文并进这次提交的提示词槽，参数表里看到的就是并好之后那串 */
+  skillIds?: string[];
 }
 
 /** 派发前参数表的一行 —— 后端 job_plan.py 的返回，前端只渲染不改判 */
@@ -290,6 +361,54 @@ export interface JobPlanRow {
 export interface JobPlanResult {
   rows: JobPlanRow[];
   totals: { count: number; blocked: number; warned: number; etaSeconds: number; etaMinutes: number; etaIsEstimate: boolean };
+}
+
+export type PathSource = "env" | "stored" | "PATH" | "missing";
+
+/** 每个目录都是「生效路径 + 这值从哪来」。不写来源就分不清是环境变量还是页面上填的 */
+export interface SystemPaths {
+  media: { path: string; source: PathSource };
+  tmp: { path: string; source: PathSource };
+  ffmpeg: { path: string; source: PathSource };
+  /** 存了但必须重启后端才换的键（媒体/临时根目录）。运行中改会让旧产物的相对路径指错 */
+  needsRestart: string[];
+}
+
+export interface SystemPathsBody {
+  media?: string | null;
+  tmp?: string | null;
+  ffmpeg?: string | null;
+}
+
+export interface AuditRow {
+  ts: string;
+  actor: string;
+  action: string;
+  target: string;
+  detail: Record<string, unknown>;
+}
+
+/** 后端拼出来的真命令。两分支的差别就是后端 routes_system.py 的真实回法：
+ *  available=false 只给 note（外加认出来的连接串），true 时 pgDump/target/三条命令一定齐，
+ *  所以这里做成可辨识联合，而不是把每个字段都标成可选再让页面到处 ??。 */
+export type BackupCommands =
+  | {
+      available: true;
+      database: string;
+      pgDump: string;
+      target: string;
+      dump: string;
+      list: string;
+      restore: string;
+      hint: string;
+      note: string;
+    }
+  | { available: false; database?: string; note: string };
+
+export interface AuditTrail {
+  items: AuditRow[];
+  total: number;
+  limit: number;
 }
 
 export interface GpuState {

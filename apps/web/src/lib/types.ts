@@ -91,6 +91,9 @@ export interface LlmBackend {
   apiKeySet?: boolean;
   chatPath: string;
   streamStyle: StreamStyle;
+  /** 用户显式配的单次调用超时（秒）；没配就是 null，后端按位置兜（本机 1800 / 云端 300） */
+  timeoutSeconds?: number | null;
+  effectiveTimeoutS?: number;
   capabilities: LlmCaps;
   isDefault: boolean;
   lastProbeAt?: string | null;
@@ -205,6 +208,14 @@ export interface Workflow {
   verifiedAt?: string | null;
   nodeCount?: number;
   slotCount?: number;
+  /** 从任务信号里读出来的模式（t2v / i2v / r2v / t2i / i2i / voice / audio_gen），库按它分组 */
+  mode?: string;
+  modeLabel?: string;
+  /** 导入时那个文件叫什么。库里存的图是改写过的，这是用户认条目的唯一线索 */
+  sourceFile?: string;
+  jsonBytes?: number;
+  /** 实例 id → 这台绑了几项默认权重 */
+  bindings?: Record<string, number>;
   sourceFormat: "api" | "ui";
   graph: Record<string, GraphNode>;
   slots: WorkflowSlot[];
@@ -255,6 +266,10 @@ export interface ModelSlot {
   options: string[];
   /** 图里写的那个文件名在这台实例上不存在 */
   missing: boolean;
+  /** 这台实例上这条工作流的默认绑定（体检与模型编辑里才有；空 = 没绑，沿用图里的） */
+  bound?: string;
+  /** 真会用的那一个：绑定值优先于图里写死的 */
+  effective?: string;
 }
 
 export interface WorkflowModelOptions {
@@ -267,6 +282,167 @@ export interface WorkflowModelOptions {
   primary: string | null;
   slots: ModelSlot[];
   notes: string[];
+}
+
+/** 一条工作流在某台 Server 上的默认权重绑定 */
+export interface WorkflowBinding {
+  instanceId: string;
+  instanceName: string;
+  placement: string;
+  /** manual = 人在模型编辑里挑的；sync = 从别的 Server 同步过来的 */
+  source: "manual" | "sync";
+  overrides: Record<string, string>;
+  updatedAt: string;
+}
+
+/** 工作流体检：一台实例一份报告，只读不改库 */
+export interface WorkflowCheckReport {
+  instanceId: string;
+  instanceName: string;
+  placement?: string;
+  protocol?: string;
+  reachable: boolean;
+  error?: string | null;
+  ok: boolean;
+  /** 人话版问题清单，界面直接列出来 */
+  problems: string[];
+  gaps: WorkflowGap[];
+  models: ModelSlot[];
+  binding: Record<string, string>;
+  /** 半截下载（尺寸对、数据是零）——只有配了本地产物目录的实例答得出 */
+  weightProblems?: string[];
+  taskKind?: string;
+  nodeCount?: number | null;
+  verifiedAt?: string | null;
+  autoSelect?: boolean;
+  priority?: number | null;
+  signals?: string[];
+}
+
+export interface WorkflowCheckResult {
+  workflowId: string;
+  workflowName: string;
+  taskKind: string;
+  mode: string;
+  modeLabel: string;
+  reports: WorkflowCheckReport[];
+}
+
+/** 一次同步里每台实例的结论。四类要分开看，因为它们对「生成用哪个文件」的影响不一样 */
+export interface SyncTargetResult {
+  instanceId: string;
+  instanceName?: string;
+  ok: boolean;
+  error?: string;
+  /** 源里挑的文件那台上也有 → 照搬 */
+  applied: string[];
+  /** 源里那个那台没有，按族/模式/角色判据换成了该台真有的 */
+  converted: { key: string; from: string; to: string; role: string }[];
+  /** 没绑的位：图里写死的文件名在这台不存在，换成这台真有的 */
+  aligned: { key: string; from: string; to: string; role: string }[];
+  /** 认不出同族就留空 —— 绝不就近凑一个 */
+  skipped: { key: string; reason: string }[];
+  /** 这台缺的节点类名：非空表示整条在这台跑不了 */
+  missingNodes?: string[];
+  blocked?: boolean;
+  written?: number;
+}
+
+export interface BindingSyncResult {
+  workflowId: string;
+  workflowName?: string;
+  sourceInstanceId: string;
+  results: SyncTargetResult[];
+}
+
+/** 整库对齐的返回：逐条工作流 × 逐台实例 */
+export interface SyncAllResult {
+  sourceInstanceId: string;
+  targets: string[];
+  onlyMissing: boolean;
+  includeBuiltin: boolean;
+  workflows: {
+    workflowId: string;
+    workflowName: string;
+    /** onlyMissing 勾上时，目标上都配过的条目就原样不动 */
+    untouched?: boolean;
+    reason?: string;
+    sourceBound?: number;
+    results: SyncTargetResult[];
+  }[];
+  totals: { workflows: number; written: number; aligned: number; skipped: number; blocked: number };
+}
+
+/** 替换 JSON 之后后端报回来的东西 */
+export interface GraphReplaceResult {
+  workflow: Workflow;
+  report: {
+    adaptations: WorkflowAdaptation[];
+    gaps: WorkflowGap[];
+    alignment: { node: string; field: string; from: string; to: string }[];
+    signals: WorkflowSignal[];
+    taskKind: string;
+    executesOn: string;
+    notes: string[];
+    prunedBindings: string[];
+  };
+}
+
+/** 实例轻量在线探测：只答「连不连得上 + 队列里几个」，不拉 /object_info */
+export interface PingResult {
+  ok: boolean;
+  instanceId: string;
+  running: number;
+  queued: number;
+  error?: string | null;
+}
+
+/* ───────── 技能库 ───────── */
+
+/**
+ * 技能挂在哪个环节的提示词框上。
+ * general 哪一处都能选；其余只在对应那一步出现，免得在出片框里挑到编剧写法。
+ */
+export type SkillStage = "general" | "script" | "asset" | "video";
+
+/**
+ * 一条技能：名称 + 一句说明 + 要发给模型的正文。
+ *
+ * 实体（角色/场景/镜头）上只存 id 不存正文：技能是能随时改的库内容，
+ * 抄一份进 IndexedDB 就等于改一次技能要重存所有资产。
+ */
+export interface Skill {
+  id: string;
+  uuid: string;
+  name: string;
+  description: string;
+  content: string;
+  stage: SkillStage;
+  tags: string[];
+  /** manual = 页面上新建；imported = 从文件导进来 */
+  origin: "manual" | "imported";
+  /** 导入那批的文件名或库名，界面上按它归堆 */
+  source: string | null;
+  updatedAt: string;
+}
+
+/** 新建/编辑技能时提交的那一份 */
+export interface SkillDraft {
+  name: string;
+  description?: string;
+  content: string;
+  stage?: SkillStage;
+  tags?: string[];
+}
+
+/** 导入结果：新建、刷新、跳过、读不动，四本账分开记 */
+export interface SkillImportReport {
+  files: number;
+  created: Skill[];
+  updated: Skill[];
+  skipped: { name: string; reason: string }[];
+  errors: { file: string; reason: string }[];
+  counts: { created: number; updated: number; skipped: number; errors: number };
 }
 
 /* ───────── 生成选择（每条资产/镜头各自一份） ───────── */
@@ -295,9 +471,16 @@ export interface GenPreset {
 export interface VoiceProfile {
   /** 参考音频（克隆底子）：服务端 media id 才算数 */
   refAudioIds: string[];
+  /**
+   * 参考音频里真实说过的那句话。
+   *
+   * 不能省，也不能编：克隆音色的解码条件就是「这段音频 + 这段文字」，
+   * 拿环境音配一句编出来的台词，模型会把十几个字拉成几分钟的连续发声。
+   */
+  refText?: string;
   /** 克隆出来的试听样本 */
   sampleMediaIds: string[];
-  /** 一句话音色描述：非克隆类工作流用它当提示词 */
+  /** 一句话音色描述：配音说明与后续人工核对用 */
   timbre?: string;
   /** 试念的文本 */
   testText?: string;
@@ -378,6 +561,8 @@ export type MediaRole =
   | "character"
   | "variation"
   | "scene"
+  | "voice"
+  | "voice_ref"
   | "keyframe_start"
   | "keyframe_end"
   | "video"
@@ -638,6 +823,8 @@ export interface Character {
   coreFeatures?: string;
   /** 这个角色用哪条工作流/哪台实例/哪颗权重出定妆照；留空跟项目默认 */
   preset?: GenPreset;
+  /** 挂在这张卡的提示词框上的技能（技能库里的 id）。正文由后端在提交时读出来并进提示词 */
+  skillIds?: string[];
   /** 音色：角色的另一半，配音与带口型的镜头都靠它 */
   voice?: VoiceProfile;
   status?: AssetState;
@@ -650,8 +837,6 @@ export interface Variation {
   refMediaIds: string[];
   visualPrompt?: string;
   negativePrompt?: string;
-  /** 换装这条路和普通出图不是同一个形状，允许单独挑工作流 */
-  preset?: GenPreset;
   status?: AssetState;
 }
 
@@ -668,6 +853,8 @@ export interface Scene {
   negativePrompt?: string;
   /** 场景概念图用哪条工作流/实例/权重：环境和人物本来就常常不是一个模型擅长 */
   preset?: GenPreset;
+  /** 挂在场景提示词框上的技能（技能库里的 id） */
+  skillIds?: string[];
   status?: AssetState;
 }
 
@@ -710,8 +897,8 @@ export interface Shot {
   workflowKey: string;
   /** 这一镜出片用哪条工作流/哪台实例/哪颗权重。优先于上面那个旧 instanceId */
   preset?: GenPreset;
-  /** 首尾帧是图片任务，和出片不是同一类工作流，允许各挑各的 */
-  imagePreset?: GenPreset;
+  /** 挂在这一镜视频提示词框上的技能（技能库里的 id） */
+  skillIds?: string[];
   turbo: string | null;
   h3Prompt: H3Prompt;
   state: ShotState;

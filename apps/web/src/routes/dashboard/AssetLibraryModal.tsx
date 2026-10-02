@@ -99,7 +99,7 @@ export function AssetLibraryModal({ open, onClose, projects }: { open: boolean; 
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-mute" aria-hidden />
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜资产名称或来源项目…" className="h-8 w-full pl-8" />
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               {FILTERS.map((f) => (
                 <button
                   key={f.key}
@@ -163,7 +163,7 @@ export function AssetLibraryModal({ open, onClose, projects }: { open: boolean; 
                         <span>{hasPrompt(it) ? "提示词已写入" : "提示词按外形现拼"}</span>
                       </div>
                     </div>
-                    <div className="flex flex-none items-center gap-1.5">
+                    <div className="flex flex-none items-center gap-2">
                       {confirmId === it.id ? (
                         <>
                           <span className="text-caption text-ink-mute">确认删除？</span>

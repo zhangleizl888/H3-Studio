@@ -46,6 +46,8 @@ export default function Script() {
 
   // 生成中要挡住重复提交与切页：state 给 UI 看，ref 给事件回调用（回调里拿不到最新 state）
   const projectRef = useRef<Project | null>(null);
+  /** 上一次看到的库里正文：用来分清"外部整篇换稿"和"用户正在敲字" */
+  const seenScript = useRef<string | null>(null);
   const draftRef = useRef("");
   const titleRef = useRef("");
   const busyRef = useRef<string | null>(null);
@@ -59,6 +61,7 @@ export default function Script() {
     if (lastId.current === id) return;
     lastId.current = id;
     seeded.current = false;
+    seenScript.current = null;
     busyRef.current = null;
     setDraft("");
     setTitle("");
@@ -79,6 +82,21 @@ export default function Script() {
     draftRef.current = project.data.rawScript;
     titleRef.current = project.name;
     setError(project.data.taskError ?? null);
+  }, [project]);
+
+  /**
+   * 库里的正文被"整篇换掉"时要跟到编辑器里来：设为当前、恢复版本都走这条。
+   * 判据是「本地草稿还停在上一份库里的正文」——用户正在敲的字（draft !== seenScript）
+   * 一律不冲，避免 refetch 把没存的内容盖掉（上面那条播种 effect 就是为了这个才只跑一次）。
+   */
+  useEffect(() => {
+    if (!project) return;
+    const ext = project.data.rawScript;
+    if (seenScript.current !== null && ext !== seenScript.current && draftRef.current === seenScript.current) {
+      setDraft(ext);
+      draftRef.current = ext;
+    }
+    seenScript.current = ext;
   }, [project]);
 
   useEffect(
@@ -214,9 +232,22 @@ export default function Script() {
       if (!text) throw new Error("模型没有返回正文");
       const before = previousText();
       const next = mode === "continue" ? `${draft.trimEnd()}\n\n${text}` : text;
+      // 改写的产物会整篇替换编辑器正文，而模型最常见的违约就是只回被改的那一段。
+      // 短一半以上就别直接盖：原稿还留在上一版里，但要用户自己决定要不要这份残缺的
+      if (mode === "rewrite" && draft.trim() && next.length < draft.trim().length * 0.5) {
+        setError(
+          `AI 改写只回了 ${next.length} 字，比当前正文 ${draft.trim().length} 字短一半以上：` +
+            "多半是模型只改了它挑中的那一段。这一份没有写回，原稿保持不动；要改局部请去右侧「对话改稿」说清改哪里，它会先停在待确认。",
+        );
+        await patchData({ taskStep: undefined });
+        return;
+      }
       onDraftChange(next);
       await patchData({ taskStep: undefined });
       await saveVersion({ text: next, source: "ai-write", previous: before });
+      setDone(
+        `AI ${mode === "continue" ? "续写" : "改写"}已写回（${before.text.length} → ${next.length} 字），原稿已存成上一版，去「版本历史」可一键退回。`,
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -353,7 +384,10 @@ export default function Script() {
   // tab 上的数字只数活版本（回收站里的不算"可用"）
   const scriptVersionCount = (scriptVersions ?? []).filter((v) => !v.deletedAt).length;
   const orphan = !busy && project.data.isParsingScript;
-  const backend = llms?.find((b) => b.id === (project.config.shotModelBackendId ?? project.config.llmBackendId));
+  // 项目没显式选后端时，实际会用的是后端默认（generate() 里同一套解析），这里别显示成「未选后端」
+  const defaultLlmId = llmDefaults?.storyboard?.backendId ?? llmDefaults?.script_parse?.backendId ?? llms?.find((b) => b.isDefault)?.id ?? null;
+  const backend =
+    llms?.find((b) => b.id === (project.config.shotModelBackendId ?? project.config.llmBackendId)) ?? llms?.find((b) => b.id === defaultLlmId);
 
   return (
     <div className="flex min-h-full flex-col">
@@ -375,7 +409,11 @@ export default function Script() {
             </span>
           ) : (
             <span className="label">
-              {backend ? `分镜走：${backend.name}${backend.capabilities.models[0] ? ` · ${backend.capabilities.models[0]}` : ""}` : "分镜走：未选后端"}
+              {backend
+                ? `分镜走：${backend.name}${project.config.shotModelBackendId || project.config.llmBackendId ? "" : "（默认）"}${
+                    backend.capabilities.models[0] ? ` · ${backend.capabilities.models[0].replace(/\\/g, "/").split("/").pop()}` : ""
+                  }`
+                : "分镜走：未选后端"}
             </span>
           )}
           {saveState === "saving" ? <Badge>保存中…</Badge> : <Badge tone="good">已自动保存</Badge>}
@@ -431,6 +469,7 @@ export default function Script() {
               continuityOverlapFrames={project.config.continuityOverlapFrames}
               aspectRatio={project.config.aspectRatio}
               llms={llms}
+              defaultLlmId={defaultLlmId}
               shotBackendId={project.config.shotModelBackendId}
               shotModel={project.config.shotModel}
               busy={busy}

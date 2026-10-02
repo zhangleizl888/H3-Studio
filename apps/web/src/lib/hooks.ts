@@ -1,8 +1,10 @@
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Api, ScriptTrashResult } from "./api";
+import type { Api, ScriptTrashResult, SystemPaths, SystemPathsBody } from "./api";
 import type { LlmRunOpts } from "./api";
-import type { LlmPurpose, ScriptVersionRow, ScriptVersionSource, VersionBucket } from "./types";
+import type { LlmPurpose, PingResult, Project, ScriptVersionRow, ScriptVersionSource, VersionBucket } from "./types";
 import { flushSaves, patchProject } from "./localStores";
+import { syncInstancePointers } from "./preset";
 import { sanitizeDanglingRefs } from "./versions";
 import { useApi } from "./apiClient";
 
@@ -13,6 +15,13 @@ export const keys = {
   llmDefaults: ["llm", "defaults"] as const,
   workflows: ["workflows"] as const,
   workflow: (id: string) => ["workflows", id] as const,
+  /** 技能库。弹窗与页面都读这一族，导入/删除之后整族失效 */
+  skills: ["skills"] as const,
+  /** 同一条工作流换一台实例，可换的权重清单就不是一套，所以实例必须在键里 */
+  workflowModels: (id: string, instanceId?: string | null) => ["workflows", id, "models", instanceId ?? "default"] as const,
+  workflowBindings: (id: string) => ["workflows", id, "bindings"] as const,
+  /** 逐台实例的轻量在线状态（只问 /system_stats 与 /queue，不拉 object_info） */
+  instanceLiveness: ["instances", "liveness"] as const,
   projects: ["projects"] as const,
   project: (id: string) => ["projects", id] as const,
   media: (id: string) => ["media", id] as const,
@@ -20,6 +29,9 @@ export const keys = {
   users: ["users"] as const,
   styles: ["styles"] as const,
   storage: ["system", "storage"] as const,
+  paths: ["system", "paths"] as const,
+  audit: ["system", "audit"] as const,
+  backup: ["system", "backup"] as const,
   /**
    * 版本历史。每一族都给「前缀」和「具体键」两种：失效时整族一起清 ——
    * 这些查询都很便宜，而漏掉一个分组就会出现"删了但卡片还挂着那张图"的假象。
@@ -35,6 +47,43 @@ export const keys = {
 export function useInstances() {
   const api = useApi();
   return useQuery({ queryKey: keys.instances, queryFn: () => api.instances.list(), refetchInterval: 30_000 });
+}
+
+/**
+ * 项目里那两个「默认实例」指针可能指着已经被删掉的行。
+ *
+ * 实例是会删的，项目（IndexedDB）里存的 id 不会跟着变，留着就是死链：每一条生成请求
+ * 都会先撞在「实例 503 不在已登记的实例里」上，而那看起来像是参数填错。摘掉它，请求
+ * 回落到后端登记的默认实例，并且当场说出来 —— 静默改写用户数据必须让人看见。
+ * 只摘不猜：绝不替用户挑一台新实例当默认。
+ */
+/**
+ * 项目里那两个「默认实例」指针、以及镜头/角色/场景各自选的实例，可能指着已经被删掉的行。
+ *
+ * 实例是会删的（本机那台就经历过 503 → 530），而项目（IndexedDB）里存的 id 不会跟着变，
+ * 留着就是死链：每一条生成请求都先撞在「实例不在已登记的实例里」上，而那看起来像参数填错。
+ * 这里当场把它对齐到真实登记的那台（只有一台时映射没有歧义），并把改了什么原话说出来 ——
+ * 静默修用户数据是不行的。多台时只摘不猜，见 lib/preset.ts 的 syncInstancePointers。
+ */
+export function useInstancePointerSync(project: Project | undefined, onSynced: (changes: string[]) => void) {
+  const api = useApi();
+  const inv = useInvalidate();
+  const { data: instances } = useInstances();
+  const done = useRef("");
+  useEffect(() => {
+    if (!project || !instances?.length) return;
+    const sync = syncInstancePointers(project, instances);
+    if (!sync?.changes.length) return;
+    const sig = `${project.id}:${sync.changes.join("|")}`;
+    if (done.current === sig) return;
+    done.current = sig;
+    void (async () => {
+      if (Object.keys(sync.config).length) await api.projects.updateConfig(project.id, sync.config);
+      if (Object.keys(sync.data).length) await api.projects.updateData(project.id, sync.data);
+      inv(keys.project(project.id), keys.projects);
+      onSynced(sync.changes);
+    })().catch(() => undefined);
+  }, [project, instances, api, inv, onSynced]);
 }
 
 export function useLlms(scope?: "local" | "cloud") {
@@ -60,6 +109,50 @@ export function useWorkflows() {
 export function useWorkflow(id: string | null) {
   const api = useApi();
   return useQuery({ queryKey: keys.workflow(id ?? ""), queryFn: () => api.workflows.get(id!), enabled: !!id });
+}
+
+/**
+ * 一条工作流（或内置模板）在那台实例上可换的权重清单。
+ *
+ * 只在真的拿到了工作流引用时才发请求："auto" 要先由后端挑一条，前端猜不到是哪条，
+ * 这时候去问任何一条的清单都是在答非所问。
+ */
+export function useWorkflowModels(ref: string | null, instanceId?: string | null) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.workflowModels(ref ?? "", instanceId),
+    queryFn: () => api.workflows.modelOptions(ref!, instanceId ?? undefined),
+    enabled: !!ref,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * 技能库清单。弹窗每次都读这一份缓存：技能是库级共享内容，不像工作流那样要问实例。
+ * stage 只是界面过滤，不带给后端也能筛 —— 但带上就更少一份会漂移的判据。
+ */
+export function useSkills(stage?: "general" | "script" | "asset" | "video") {
+  const api = useApi();
+  return useQuery({ queryKey: stage ? [...keys.skills, stage] as const : keys.skills, queryFn: () => api.skills.list(stage), staleTime: 30_000 });
+}
+
+export function useSkillMutations() {
+  const api = useApi();
+  const inv = useInvalidate();
+  const after = () => inv(keys.skills);
+  return {
+    create: useMutation({ mutationFn: api.skills.create, onSuccess: after }),
+    update: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: Parameters<Api["skills"]["update"]>[1] }) => api.skills.update(id, body),
+      onSuccess: after,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => api.skills.remove(id), onSuccess: after }),
+    importFiles: useMutation({
+      mutationFn: ({ files, library }: { files: File[]; library?: string }) => api.skills.importFiles(files, library),
+      onSuccess: after,
+    }),
+    clear: useMutation({ mutationFn: () => api.skills.clear(), onSuccess: after }),
+  };
 }
 
 export function useProjects() {
@@ -112,6 +205,34 @@ export function useStorage() {
   return useQuery({ queryKey: keys.storage, queryFn: () => api.system.storage() });
 }
 
+/** 目录设置：后端真正在用的那一份（含来源），不是页面常量 */
+export function useSystemPaths() {
+  const api = useApi();
+  return useQuery({ queryKey: keys.paths, queryFn: () => api.system.paths() });
+}
+
+/** 操作记录：配置变更、派发、导出、登录失败。设置页以前那份是写死的示例 */
+export function useAuditTrail(limit = 80) {
+  const api = useApi();
+  return useQuery({ queryKey: [...keys.audit, limit] as const, queryFn: () => api.system.audit({ limit }) });
+}
+
+export function useSystemBackup() {
+  const api = useApi();
+  return useQuery({ queryKey: keys.backup, queryFn: () => api.system.backup() });
+}
+
+export function useSavePaths() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SystemPathsBody): Promise<{ paths: SystemPaths; needsRestart: string[] }> => api.system.savePaths(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["system"] });
+    },
+  });
+}
+
 function useInvalidate() {
   const qc = useQueryClient();
   return (...keysList: readonly (readonly unknown[])[]) => keysList.forEach((k) => qc.invalidateQueries({ queryKey: k }));
@@ -153,8 +274,7 @@ export function useWorkflowMutations() {
   const inv = useInvalidate();
   return {
     importJson: useMutation({
-      mutationFn: ({ name, json, instanceId }: { name: string; json: string; instanceId?: string }) =>
-        api.workflows.importJson(name, json, instanceId),
+      mutationFn: (body: Parameters<Api["workflows"]["importJson"]>[0]) => api.workflows.importJson(body),
       onSuccess: () => inv(keys.workflows),
     }),
     validate: useMutation({ mutationFn: ({ json, instanceId }: { json: string; instanceId?: string }) => api.workflows.validate(json, instanceId) }),
@@ -171,7 +291,75 @@ export function useWorkflowMutations() {
       mutationFn: ({ id, body }: { id: string; body: { autoSelect?: boolean; priority?: number } }) => api.workflows.patch(id, body),
       onSuccess: () => inv(keys.workflows),
     }),
+    /** 保存某台 Server 上的默认权重。全空 = 后端会把这条绑定删掉（恢复图里写死的那一份） */
+    saveBindings: useMutation({
+      mutationFn: ({ id, instanceId, overrides }: { id: string; instanceId: string; overrides: Record<string, string> }) =>
+        api.workflows.saveBindings(id, { instanceId, overrides }),
+      onSuccess: (_r, v) => inv(keys.workflows, keys.workflowBindings(v.id), keys.workflowModels(v.id, v.instanceId)),
+    }),
+    clearBindings: useMutation({
+      mutationFn: ({ id, instanceId }: { id: string; instanceId: string }) => api.workflows.clearBindings(id, instanceId),
+      onSuccess: (_r, v) => inv(keys.workflows, keys.workflowBindings(v.id), keys.workflowModels(v.id, v.instanceId)),
+    }),
+    syncBindings: useMutation({
+      mutationFn: ({ id, sourceInstanceId, targetInstanceIds, alignUnbound }: { id: string; sourceInstanceId: string; targetInstanceIds: string[]; alignUnbound?: boolean }) =>
+        api.workflows.syncBindings(id, { sourceInstanceId, targetInstanceIds, alignUnbound }),
+      onSuccess: (_r, v) => inv(keys.workflows, keys.workflowBindings(v.id)),
+    }),
+    /** 整库对齐：库里每条 + 每台目标。["workflows"] 是前缀，各条的 bindings/models 子键一起失效 */
+    syncAll: useMutation({
+      mutationFn: (body: Parameters<Api["workflows"]["syncAll"]>[0]) => api.workflows.syncAll(body),
+      onSuccess: () => inv(keys.workflows),
+    }),
+    /** 体检只读，不进缓存：结论属于点下按钮的那一秒，实例上的东西随时会变 */
+    check: useMutation({ mutationFn: ({ id, instanceIds }: { id: string; instanceIds?: string[] }) => api.workflows.check(id, instanceIds) }),
+    replaceGraph: useMutation({
+      mutationFn: ({ id, graph, instanceId }: { id: string; graph: string; instanceId?: string }) =>
+        api.workflows.replaceGraph(id, { graph, instanceId }),
+      onSuccess: () => inv(keys.workflows),
+    }),
   };
+}
+
+/** 一条工作流在每台实例上的默认权重。模型编辑与同步两个弹窗都读这一份 */
+export function useWorkflowBindings(id: string | null) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.workflowBindings(id ?? ""),
+    queryFn: () => api.workflows.bindings(id!),
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * 逐台实例的在线状态，12 秒一次轻量探测。
+ *
+ * 为什么不用 useInstances 里的 lastProbeOk：那一列只有完整探活（/probe）才写，
+ * 而完整探活要拉一次全量 /object_info（本机约 30MB）。管理页要的是「现在连不连得上、
+ * 队列里跑着几个」，那就得用 ping，不能拿几十分钟前的探活结果冒充实时状态。
+ */
+export function useInstanceLiveness(enabled = true) {
+  const api = useApi();
+  const { data: instances } = useInstances();
+  return useQuery({
+    queryKey: keys.instanceLiveness,
+    queryFn: async () => {
+      const rows = await Promise.all(
+        (instances ?? []).map(async (i): Promise<[string, PingResult]> => {
+          try {
+            return [i.id, await api.instances.ping(i.id)];
+          } catch (e) {
+            return [i.id, { ok: false, instanceId: i.id, running: 0, queued: 0, error: (e as Error).message }];
+          }
+        }),
+      );
+      return Object.fromEntries(rows) as Record<string, PingResult>;
+    },
+    enabled: enabled && !!instances?.length,
+    refetchInterval: 12_000,
+    staleTime: 4_000,
+  });
 }
 
 export function useProjectMutations(id?: string) {

@@ -5,8 +5,10 @@
  * 原词直接贴在卡片上会显得没加工过。
  */
 
-import { FolderPlus, MapPin, RefreshCw, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronRight, FolderPlus, MapPin, RefreshCw, Trash2 } from "lucide-react";
 import { StateGlyph } from "../../../components/ui";
+import { GenPresetPicker } from "../../../components/GenPresetPicker";
 import { buildScenePrompt } from "../../../lib/prompts";
 import type { Media, Project, Scene } from "../../../lib/types";
 import type { GenHandle } from "../../../lib/useGenerate";
@@ -28,6 +30,7 @@ export interface SceneCardProps {
 }
 
 export function SceneCard({ project, scene, mediaById, handle, onGenerate, onUpload, onPatch, onSavePrompts, onAddToLibrary, onDelete, onPreview }: SceneCardProps) {
+  const [gen, setGen] = useState(false);
   const refId = scene.refMediaIds[0];
   const refMedia = refId ? mediaById.get(refId) : undefined;
   const running = !!handle && (handle.state === "queued" || handle.state === "dispatching" || handle.state === "running");
@@ -87,9 +90,27 @@ export function SceneCard({ project, scene, mediaById, handle, onGenerate, onUpl
           onSave={onSavePrompts}
           maxHeight="max-h-[132px]"
           disabled={running}
+          skillIds={scene.skillIds}
+          onPatchSkills={(ids) => onPatch({ skillIds: ids })}
         />
 
         {handle && <GenBar handle={handle} />}
+
+        <div className="space-y-1.5">
+          <button
+            type="button"
+            aria-expanded={gen}
+            onClick={() => setGen((g) => !g)}
+            className="label-mono flex w-full items-center justify-between rounded-ctl px-1 py-0.5 transition-colors hover:bg-sheen"
+          >
+            <span className="flex items-center gap-1">
+              {gen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              生成选择 · 工作流 / 实例 / 模型
+            </span>
+            <span className="mono">{scene.preset?.workflow ? "已单独指定" : "跟随项目默认"}</span>
+          </button>
+          {gen && <GenPresetPicker project={project} kind="image" value={scene.preset} onChange={(p) => onPatch({ preset: p })} compact className="rounded-ctl border border-hairline bg-inset p-2" />}
+        </div>
 
         <div className="mt-auto space-y-1.5">
           <div className="flex gap-1.5">

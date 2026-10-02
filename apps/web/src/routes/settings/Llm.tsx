@@ -260,6 +260,13 @@ function BackendGroup({
 }) {
   const [pullFor, setPullFor] = useState<LlmBackend | null>(null);
   const mut = useLlmMutations();
+  /** 单次超时：留空=交回后端按位置兜（本机 1800 / 云端 300）。写死 300 秒会掐断本机大模型的正常生成 */
+  const commitTimeout = (b: LlmBackend, raw: string) => {
+    const v = raw.trim();
+    const next = v ? Math.min(7200, Math.max(30, Math.round(Number(v)) || 30)) : null;
+    if (next === (b.timeoutSeconds ?? null)) return;
+    void mut.update.mutateAsync({ id: b.id, body: { timeoutSeconds: next } });
+  };
   return (
     <Panel
       title={
@@ -302,7 +309,7 @@ function BackendGroup({
                   </span>
                 )}
                 {b.capabilities.enterpriseSharedOnly && <Badge tone="warn">仅企业级-共享 key</Badge>}
-                <div className="ml-auto flex items-center gap-1.5">
+                <div className="ml-auto flex items-center gap-2">
                   <Button size="sm" variant="quiet" onClick={() => onProbe(b.id)} disabled={busy}>
                     探活
                   </Button>
@@ -332,6 +339,22 @@ function BackendGroup({
                 <CapMark on={b.capabilities.hasVision} label="视觉" />
                 <CapMark on={b.capabilities.hasTools} label="工具调用" />
                 <span>{b.streamStyle === "ndjson" ? "流式 NDJSON" : "流式 SSE"}</span>
+                <span className="inline-flex items-center gap-1">
+                  单次超时
+                  <input
+                    key={`${b.id}-${b.timeoutSeconds ?? "auto"}`}
+                    defaultValue={b.timeoutSeconds ?? ""}
+                    inputMode="numeric"
+                    aria-label={`${b.name} 的单次调用超时秒数`}
+                    title="留空 = 按位置兜底（本机 1800 秒 / 云端 300 秒）。回车或离开输入框即保存"
+                    className="mono w-14 rounded-ctl border border-rule bg-inset px-1 py-0.5 text-caption text-ink-dim"
+                    onBlur={(e) => commitTimeout(b, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitTimeout(b, (e.target as HTMLInputElement).value);
+                    }}
+                  />
+                  <span className="mono text-ink-dim">实际 {b.effectiveTimeoutS ?? "—"} 秒</span>
+                </span>
                 <span className="ml-auto">上次探活 {fmtTime(b.lastProbeAt)}</span>
               </div>
 
@@ -409,11 +432,19 @@ function AddBackendModal({
 }: {
   scope: LlmBackend["scope"] | null;
   onClose: () => void;
-  onCreate: (body: { name: string; scope: LlmBackend["scope"]; kind: LlmBackend["kind"]; baseUrl: string; isDefault?: boolean }) => void;
+  onCreate: (body: {
+    name: string;
+    scope: LlmBackend["scope"];
+    kind: LlmBackend["kind"];
+    baseUrl: string;
+    isDefault?: boolean;
+    timeoutSeconds?: number | null;
+  }) => void;
 }) {
   const [preset, setPreset] = useState("ollama");
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState(PRESETS.ollama.baseUrl);
+  const [timeoutS, setTimeoutS] = useState("");
   const [isDefault, setIsDefault] = useState(false);
 
   const effScope = scope ?? "local";
@@ -436,6 +467,8 @@ function AddBackendModal({
                 scope: effScope,
                 kind: PRESETS[preset].kind,
                 baseUrl: baseUrl.trim(),
+                // 留空 = 不发给后端，让它按位置兜底（本机 1800 / 云端 300）
+                timeoutSeconds: timeoutS.trim() ? Math.min(7200, Math.max(30, Math.round(Number(timeoutS)))) : undefined,
                 isDefault,
               })
             }
@@ -473,6 +506,18 @@ function AddBackendModal({
           }
         >
           <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="mono" />
+        </Field>
+        <Field
+          label="单次超时（秒）"
+          hint="留空按位置兜底：本机 1800、云端 300。本机大模型单槽串行，出满 4096 token 要 8 分钟以上 —— 这个值设太小会把还在正常生成的调用掐成 ReadTimeout。"
+        >
+          <Input
+            value={timeoutS}
+            onChange={(e) => setTimeoutS(e.target.value)}
+            inputMode="numeric"
+            placeholder="留空即可（30–7200）"
+            className="mono"
+          />
         </Field>
         <Toggle checked={isDefault} onChange={setIsDefault} label="设为本组默认" />
       </div>

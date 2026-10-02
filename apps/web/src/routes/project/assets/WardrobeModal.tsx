@@ -68,7 +68,7 @@ export function WardrobeModal({ project, char, mediaById, handles, onClose, onPa
           <h4 className="label-mono flex items-center gap-1.5">
             <Layers className="h-3 w-3" /> 基准形象
           </h4>
-          <div className="rounded-panel border border-hairline bg-void/40 p-3">
+          <div className="rounded-panel border border-hairline bg-inset p-3">
             <MediaImage
               media={refMedia}
               seedText={char.id}
@@ -177,7 +177,7 @@ export function WardrobeModal({ project, char, mediaById, handles, onClose, onPa
                         onFile={(file) => onUploadVariation(v.id, file)}
                         title="上传一张造型图，直接作为该变体的产物"
                       />
-                      <span className="mono ml-auto text-micro text-ink-mute">{v.refMediaIds.length ? `${v.refMediaIds.length} 图` : "无产物"}</span>
+                      <span className="mono ml-auto text-caption text-ink-mute">{v.refMediaIds.length ? `${v.refMediaIds.length} 图` : "无产物"}</span>
                     </div>
                   </div>
                 </li>

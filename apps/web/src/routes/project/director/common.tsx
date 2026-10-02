@@ -174,7 +174,7 @@ export function MediaImage({
       ) : (
         <MediaFrame seedText={seedText} kind={!media ? "none" : !still ? "video" : "image"} className="absolute inset-0 rounded-none border-0" />
       )}
-      {label && <div className="absolute inset-x-0 bottom-0 bg-black/45 px-1.5 py-[2px] text-micro text-white/85">{label}</div>}
+      {label && <div className="absolute inset-x-0 bottom-0 bg-scrim/70 px-1.5 py-[2px] text-micro text-on-scrim">{label}</div>}
     </div>
   );
 }
@@ -275,5 +275,5 @@ export function VideoPreview({ media }: { media: Media | undefined }) {
   const src = useMediaSrc(media);
   if (!media) return <p className="py-8 text-center text-note text-ink-mute">这一段在索引里找不到记录。</p>;
   if (!src) return <p className="py-8 text-center text-note text-ink-mute">这个文件还读不回来：产物可能已被清理，或后端没起着。</p>;
-  return <video src={src} controls autoPlay playsInline className="max-h-[62vh] w-full rounded-ctl border border-rule-soft bg-void" />;
+  return <video src={src} controls autoPlay playsInline className="max-h-[62vh] w-full rounded-ctl border border-rule-soft bg-scrim" />;
 }

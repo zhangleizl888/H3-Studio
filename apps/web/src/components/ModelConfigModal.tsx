@@ -43,13 +43,13 @@ export default function ModelConfigModal({ open, onClose, projectId }: { open: b
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/65 p-6" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim/65 p-6" onMouseDown={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="模型配置"
         onMouseDown={(e) => e.stopPropagation()}
-        className="mt-6 mb-6 flex w-full max-w-[860px] flex-col overflow-hidden rounded-sheet border border-hairline bg-slate shadow-[0_24px_70px_rgba(0,0,0,.6)]"
+        className="mt-6 mb-6 flex w-full max-w-[860px] flex-col overflow-hidden rounded-sheet border border-hairline bg-slate shadow-sheet"
       >
         <header className="flex flex-none items-center gap-3 border-b border-hairline px-6 py-4">
           <span className="grid h-10 w-10 flex-none place-items-center rounded-panel border border-chrome/25 bg-chrome/10 text-chrome">
@@ -716,7 +716,7 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
                     {gaps.length > 0 && <Badge tone="warn">缺 {gaps.length} 处</Badge>}
                     {w.verifiedAt && <Badge tone="good">本机跑通过</Badge>}
                     {w.tags?.slice(0, 3).map((t) => (
-                      <span key={t} className="mono rounded-panel border border-rule-soft px-1.5 py-[1px] text-micro text-ink-mute">
+                      <span key={t} className="mono rounded-panel border border-rule-soft px-1.5 py-[1px] text-caption text-ink-mute">
                         {t}
                       </span>
                     ))}
@@ -741,7 +741,7 @@ function TemplateTab({ family, project, workflows, fallback }: { family: "image"
                     )}
                   </div>
                   {gaps.length > 0 && (
-                    <p className="mt-1 pl-6 text-caption leading-snug text-warn">
+                    <p className="mt-1 pl-6 text-caption leading-snug text-state-warn">
                       这台实例跑不动：{gaps.slice(0, 2).map((g) => `${g.class_type}${g.pack ? `（要装 ${g.pack}）` : ""}`).join("；")}
                       {gaps.length > 2 ? ` 等 ${gaps.length} 处` : ""}
                     </p>

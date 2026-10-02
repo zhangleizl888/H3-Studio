@@ -6,13 +6,15 @@
  */
 
 import { useState } from "react";
-import { FolderPlus, Layers, RefreshCw, Sparkles, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderPlus, Layers, RefreshCw, Sparkles, Trash2, Users } from "lucide-react";
 import { Badge, StateGlyph } from "../../../components/ui";
+import { GenPresetPicker } from "../../../components/GenPresetPicker";
 import { buildCharacterPrompt } from "../../../lib/prompts";
-import type { Character, Media, Project } from "../../../lib/types";
+import type { Character, Media, Project, VoiceProfile } from "../../../lib/types";
 import type { GenHandle } from "../../../lib/useGenerate";
 import { CardAction, DoneBadge, GenBar, InlineEdit, MediaImage, UploadButton, assetStateOf } from "./common";
 import { PromptEditor } from "./PromptEditor";
+import { VoicePanel } from "./VoicePanel";
 
 type Traits = NonNullable<Character["traits"]>;
 /** traits.age 与卡片上的「年龄段」是同一件事，只在卡片上编辑 */
@@ -29,9 +31,13 @@ export interface CharacterCardProps {
   char: Character;
   mediaById: Map<string, Media>;
   handle?: GenHandle;
+  voiceHandle?: GenHandle;
   onGenerate: () => void;
+  onGenerateVoice: () => void;
   onUpload: (file: File) => void;
+  onUploadAudio: (file: File) => void;
   onPatch: (patch: Partial<Character>) => void;
+  onPatchVoice: (patch: Partial<VoiceProfile>) => void;
   onSavePrompts: (patch: { visualPrompt: string; negativePrompt: string }) => void;
   onOpenWardrobe: () => void;
   onAddToLibrary: () => void;
@@ -40,8 +46,9 @@ export interface CharacterCardProps {
   onPreview: (media: Media, title: string) => void;
 }
 
-export function CharacterCard({ project, char, mediaById, handle, onGenerate, onUpload, onPatch, onSavePrompts, onOpenWardrobe, onAddToLibrary, onReplaceFromLibrary, onDelete, onPreview }: CharacterCardProps) {
+export function CharacterCard({ project, char, mediaById, handle, voiceHandle, onGenerate, onGenerateVoice, onUpload, onUploadAudio, onPatch, onPatchVoice, onSavePrompts, onOpenWardrobe, onAddToLibrary, onReplaceFromLibrary, onDelete, onPreview }: CharacterCardProps) {
   const [more, setMore] = useState(false);
+  const [gen, setGen] = useState(false);
   const refId = char.refMediaIds[0];
   const refMedia = refId ? mediaById.get(refId) : undefined;
   const running = !!handle && (handle.state === "queued" || handle.state === "dispatching" || handle.state === "running");
@@ -95,7 +102,7 @@ export function CharacterCard({ project, char, mediaById, handle, onGenerate, on
                   <span className="mono">+{variationCount}</span> 变体
                 </Badge>
               )}
-              <span className="mono ml-auto flex-none text-micro text-ink-mute" title="同一角色固定种子，配合参考图复用才有稳定外形">
+              <span className="mono ml-auto flex-none text-caption text-ink-mute" title="同一角色固定种子，配合参考图复用才有稳定外形">
                 seed {char.seed}
               </span>
             </div>
@@ -137,7 +144,7 @@ export function CharacterCard({ project, char, mediaById, handle, onGenerate, on
           <span className="mono">{more ? "收起" : filled ? `${filled}/${TRAIT_FIELDS.length + 1}` : "待补"}</span>
         </button>
         {more && (
-          <div className="space-y-1.5 rounded-ctl border border-hairline bg-void/40 p-2">
+          <div className="space-y-1.5 rounded-ctl border border-hairline bg-inset p-2">
             <TraitRow label="外形一句话" value={char.desc} placeholder="身形、气质、明显特征" onCommit={(v) => onPatch({ desc: v })} />
             {TRAIT_FIELDS.map((f) => (
               <TraitRow key={f.key} label={f.label} value={char.traits?.[f.key]} placeholder={f.placeholder} onCommit={(v) => onPatch({ traits: { ...char.traits, [f.key]: v } })} />
@@ -148,6 +155,25 @@ export function CharacterCard({ project, char, mediaById, handle, onGenerate, on
 
       {handle && <GenBar handle={handle} />}
 
+      {/* 生成选择：这个角色用哪条工作流 / 哪台实例 / 哪颗权重 */}
+      <div className="space-y-1.5">
+        <button
+          type="button"
+          aria-expanded={gen}
+          onClick={() => setGen((g) => !g)}
+          className="label-mono flex w-full items-center justify-between rounded-ctl px-1 py-0.5 transition-colors hover:bg-sheen"
+        >
+          <span className="flex items-center gap-1">
+            {gen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            生成选择 · 工作流 / 实例 / 模型
+          </span>
+          <span className="mono">{char.preset?.workflow ? "已单独指定" : "跟随项目默认"}</span>
+        </button>
+        {gen && <GenPresetPicker project={project} kind="image" value={char.preset} onChange={(p) => onPatch({ preset: p })} compact className="rounded-ctl border border-hairline bg-inset p-2" />}
+      </div>
+
+      <VoicePanel project={project} char={char} mediaById={mediaById} handle={voiceHandle} onPatch={onPatchVoice} onUploadAudio={onUploadAudio} onGenerate={onGenerateVoice} />
+
       <PromptEditor
         label="角色提示词"
         prompt={char.visualPrompt}
@@ -156,6 +182,8 @@ export function CharacterCard({ project, char, mediaById, handle, onGenerate, on
         placeholder="Core Identity / Facial Features / Clothing… 留空则按上面的资料现拼"
         onSave={onSavePrompts}
         disabled={running}
+        skillIds={char.skillIds}
+        onPatchSkills={(ids) => onPatch({ skillIds: ids })}
       />
 
       <div className="space-y-1.5">
